@@ -35,11 +35,16 @@ import android.content.IntentFilter
 import android.os.Build
 import android.telephony.SmsMessage
 import androidx.compose.ui.platform.LocalContext
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.PhoneAuthProvider
+import com.example.khatabook.data.api.VerifyTokenRequest
+import kotlinx.coroutines.tasks.await
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun OtpVerificationScreen(
     phoneNumber: String,
+    verificationId: String,
     onBackClick: () -> Unit,
     /** Returns the JWT access token and whether the user is new */
     onVerifySuccess: (accessToken: String, isNewUser: Boolean) -> Unit,
@@ -92,7 +97,12 @@ fun OtpVerificationScreen(
                                             isLoading = true
                                             coroutineScope.launch {
                                                 try {
-                                                    val response = NetworkClient.apiService.verifyOtp(VerifyRequest(phoneNumber, otpCode))
+                                                    val credential = PhoneAuthProvider.getCredential(verificationId, otpCode)
+                                                    val authResult = FirebaseAuth.getInstance().signInWithCredential(credential).await()
+                                                    val tokenResult = authResult.user?.getIdToken(false)?.await()
+                                                    val idToken = tokenResult?.token ?: throw Exception("Token missing")
+                                                    
+                                                    val response = NetworkClient.apiService.verifyToken(VerifyTokenRequest(idToken))
                                                     if (response.isSuccessful && response.body() != null) {
                                                         val body = response.body()!!
                                                         onVerifySuccess(body.access_token, body.is_new_user)
@@ -238,19 +248,7 @@ fun OtpVerificationScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Hint: check backend console for the OTP
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(8.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF8E1))
-            ) {
-                Text(
-                    text = "💡 Check the backend console log for your OTP",
-                    fontSize = 12.sp,
-                    color = Color(0xFF795548),
-                    modifier = Modifier.padding(10.dp)
-                )
-            }
+            // Hint removed as it's no longer from our backend console
 
             Spacer(modifier = Modifier.height(16.dp))
 
@@ -273,13 +271,10 @@ fun OtpVerificationScreen(
                             canResend = false
                             otpCode = ""
                             errorMessage = null
-                            coroutineScope.launch {
-                                try {
-                                    NetworkClient.apiService.requestOtp(
-                                        com.example.khatabook.data.api.OtpRequest(phone = phoneNumber)
-                                    )
-                                } catch (_: Exception) { /* silent — timer already reset */ }
-                            }
+                                // Cannot easily resend via Firebase without Activity context here, 
+                                // so usually you let them go back and request again, or pass context here.
+                                // For simplicity, we just clear and tell them to go back.
+                                errorMessage = "Please go back to request a new OTP"
                         }
                     )
                 }
@@ -294,8 +289,13 @@ fun OtpVerificationScreen(
                         errorMessage = null
                         coroutineScope.launch {
                             try {
-                                val response = NetworkClient.apiService.verifyOtp(
-                                    VerifyRequest(phone = phoneNumber, otp = otpCode)
+                                val credential = PhoneAuthProvider.getCredential(verificationId, otpCode)
+                                val authResult = FirebaseAuth.getInstance().signInWithCredential(credential).await()
+                                val tokenResult = authResult.user?.getIdToken(false)?.await()
+                                val idToken = tokenResult?.token ?: throw Exception("Token missing")
+                                
+                                val response = NetworkClient.apiService.verifyToken(
+                                    VerifyTokenRequest(idToken = idToken)
                                 )
                                 if (response.isSuccessful && response.body() != null) {
                                     val body = response.body()!!
@@ -305,7 +305,7 @@ fun OtpVerificationScreen(
                                     otpCode = ""
                                 }
                             } catch (e: Exception) {
-                                errorMessage = "Cannot reach server. Check your connection."
+                                errorMessage = "Cannot reach server or invalid OTP."
                             } finally {
                                 isLoading = false
                             }

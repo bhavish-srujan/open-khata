@@ -2,6 +2,7 @@ plugins {
   alias(libs.plugins.android.application)
   alias(libs.plugins.kotlin.android)
   alias(libs.plugins.compose.compiler)
+  id("com.google.gms.google-services")
 }
 
 android {
@@ -58,6 +59,10 @@ dependencies {
 
   // Multidex support
   implementation("androidx.multidex:multidex:2.0.1")
+
+  // Firebase
+  implementation(platform("com.google.firebase:firebase-bom:33.1.2"))
+  implementation("com.google.firebase:firebase-auth")
 
   // Core Android & Material dependencies
   implementation("androidx.appcompat:appcompat:1.7.0")

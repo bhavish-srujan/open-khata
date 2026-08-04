@@ -23,18 +23,26 @@ import com.example.khatabook.data.api.NetworkClient
 import com.example.khatabook.data.api.OtpRequest
 import com.example.khatabook.ui.theme.*
 import kotlinx.coroutines.launch
+import android.app.Activity
+import androidx.compose.ui.platform.LocalContext
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.PhoneAuthOptions
+import com.google.firebase.auth.PhoneAuthProvider
+import com.google.firebase.FirebaseException
+import java.util.concurrent.TimeUnit
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MobileAuthScreen(
     onBackClick: () -> Unit,
-    onSendOtp: (phoneNumber: String) -> Unit,
+    onSendOtp: (phoneNumber: String, verificationId: String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var phoneNumber by remember { mutableStateOf("") }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var isLoading by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
+    val context = LocalContext.current
 
     Scaffold(
         topBar = {
@@ -144,20 +152,29 @@ fun MobileAuthScreen(
                         val fullPhone = "+91$phoneNumber"
                         isLoading = true
                         errorMessage = null
-                        coroutineScope.launch {
-                            try {
-                                val response = NetworkClient.apiService.requestOtp(OtpRequest(phone = fullPhone))
-                                if (response.isSuccessful) {
-                                    onSendOtp(fullPhone)
-                                } else {
-                                    errorMessage = "Server error (${response.code()}). Try again."
+                        
+                        val activity = context as Activity
+                        val options = PhoneAuthOptions.newBuilder(FirebaseAuth.getInstance())
+                            .setPhoneNumber(fullPhone)
+                            .setTimeout(60L, TimeUnit.SECONDS)
+                            .setActivity(activity)
+                            .setCallbacks(object : PhoneAuthProvider.OnVerificationStateChangedCallbacks() {
+                                override fun onVerificationCompleted(credential: com.google.firebase.auth.PhoneAuthCredential) {
+                                    // Handled in next screen if auto-resolved
                                 }
-                            } catch (e: Exception) {
-                                errorMessage = "Cannot reach server. Check your connection."
-                            } finally {
-                                isLoading = false
-                            }
-                        }
+                                override fun onVerificationFailed(e: FirebaseException) {
+                                    isLoading = false
+                                    errorMessage = e.message ?: "Verification failed"
+                                }
+                                override fun onCodeSent(
+                                    verificationId: String,
+                                    token: PhoneAuthProvider.ForceResendingToken
+                                ) {
+                                    isLoading = false
+                                    onSendOtp(fullPhone, verificationId)
+                                }
+                            }).build()
+                        PhoneAuthProvider.verifyPhoneNumber(options)
                     } else {
                         errorMessage = "Please enter a valid 10-digit mobile number"
                     }

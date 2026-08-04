@@ -191,6 +191,7 @@ class MainActivity : AppCompatActivity() {
                     }
                     var showAccountSwitcher by remember { mutableStateOf(false) }
                     var phoneNumberToVerify by remember { mutableStateOf("") }
+                    var firebaseVerificationId by remember { mutableStateOf("") }
 
                     LaunchedEffect(authenticatedPhone) {
                         if (authenticatedPhone.isNotBlank()) {
@@ -270,8 +271,9 @@ class MainActivity : AppCompatActivity() {
                                 AppScreen.MOBILE_AUTH -> {
                                     MobileAuthScreen(
                                         onBackClick = { navigateBack() },
-                                        onSendOtp = { phone ->
+                                        onSendOtp = { phone, verId ->
                                             phoneNumberToVerify = phone
+                                            firebaseVerificationId = verId
                                             navigateTo(AppScreen.OTP_VERIFICATION)
                                         }
                                     )
@@ -281,6 +283,7 @@ class MainActivity : AppCompatActivity() {
                                     val coroutineScope = rememberCoroutineScope()
                                     OtpVerificationScreen(
                                         phoneNumber = phoneNumberToVerify,
+                                        verificationId = firebaseVerificationId,
                                         onBackClick = { navigateBack() },
                                         onVerifySuccess = { accessToken, isNewUser ->
                                             // Persist JWT so NetworkClient picks it up immediately

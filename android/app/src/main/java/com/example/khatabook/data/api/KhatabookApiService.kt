@@ -4,11 +4,8 @@ import retrofit2.Response
 import retrofit2.http.*
 
 // ─── Auth DTOs ───────────────────────────────────────────────
-data class OtpRequest(val phone: String)
-data class OtpResponse(val message: String)
-
-data class VerifyRequest(val phone: String, val otp: String)
-data class VerifyResponse(val access_token: String, val is_new_user: Boolean)
+data class VerifyTokenRequest(val idToken: String)
+data class VerifyTokenResponse(val access_token: String, val is_new_user: Boolean)
 
 // ─── Party DTOs ──────────────────────────────────────────────
 data class PartyResponse(
@@ -55,11 +52,8 @@ data class CreateLedgerEntryRequest(
 interface KhatabookApiService {
 
     // Auth
-    @POST("auth/request-otp")
-    suspend fun requestOtp(@Body body: OtpRequest): Response<OtpResponse>
-
-    @POST("auth/verify-otp")
-    suspend fun verifyOtp(@Body body: VerifyRequest): Response<VerifyResponse>
+    @POST("auth/verify-token")
+    suspend fun verifyToken(@Body body: VerifyTokenRequest): Response<VerifyTokenResponse>
 
     // Parties
     @GET("api/v1/parties")

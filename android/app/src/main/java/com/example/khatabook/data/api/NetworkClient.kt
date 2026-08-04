@@ -7,8 +7,8 @@ import retrofit2.converter.gson.GsonConverterFactory
 import java.util.concurrent.TimeUnit
 
 object NetworkClient {
-    // For physical device: PC's WiFi IP. For emulator use: http://10.0.2.2:3000/
-    private const val BASE_URL = "http://10.237.29.153:3000/"
+    // Pointing to live Render backend
+    private const val BASE_URL = "https://khata-book-zirg.onrender.com/"
 
     /**
      * Set this before the first network call (e.g. in MainActivity.onCreate).
