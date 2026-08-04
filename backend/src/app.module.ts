@@ -12,6 +12,8 @@ import { AuthModule } from './auth/auth.module';
 import { User } from './users/user.entity';
 import { Party } from './party/party.entity';
 import { LedgerEntry } from './ledger/ledger-entry.entity';
+import { RemindersModule } from './reminders/reminders.module';
+import { ScanningModule } from './scanning/scanning.module';
 
 @Module({
   imports: [
@@ -32,6 +34,8 @@ import { LedgerEntry } from './ledger/ledger-entry.entity';
     BusinessModule,
     PartyModule,
     LedgerModule,
+    RemindersModule,
+    ScanningModule,
   ],
   controllers: [AppController],
   providers: [AppService],

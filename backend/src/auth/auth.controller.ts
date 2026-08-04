@@ -6,8 +6,14 @@ export class AuthController {
   constructor(private authService: AuthService) {}
 
   @HttpCode(HttpStatus.OK)
-  @Post('verify-token')
-  verifyToken(@Body() body: { idToken: string }) {
-    return this.authService.verifyFirebaseToken(body.idToken);
+  @Post('request-otp')
+  requestOtp(@Body() body: { phoneNumber: string }) {
+    return this.authService.requestOtp(body.phoneNumber);
+  }
+
+  @HttpCode(HttpStatus.OK)
+  @Post('verify-otp')
+  verifyOtp(@Body() body: { phoneNumber: string, otp: string }) {
+    return this.authService.verifyOtp(body.phoneNumber, body.otp);
   }
 }

@@ -11,6 +11,7 @@ import {
   UseGuards,
   Headers,
   BadRequestException,
+  Req,
 } from '@nestjs/common';
 import { PartyService } from './party.service';
 import { CreatePartyDto } from './dto/create-party.dto';
@@ -21,36 +22,38 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 export class PartyController {
   constructor(private readonly partyService: PartyService) {}
 
-  private extractBusinessId(headers: Record<string, string>): string {
-    const businessId = headers['x-business-id'];
+  private extractBusinessId(req: any, headers: Record<string, string>): string {
+    const businessId = req.user?.businessId || headers['x-business-id'];
+
     if (!businessId) {
-      throw new BadRequestException('x-business-id header is required');
+      throw new BadRequestException('businessId is required in token or x-business-id header');
     }
     return businessId as string;
   }
 
   @Get()
-  getAllParties(@Headers() headers, @Query('type') type?: 'CUSTOMER' | 'SUPPLIER') {
-    const businessId = this.extractBusinessId(headers);
+  getAllParties(@Req() req, @Headers() headers, @Query('type') type?: 'CUSTOMER' | 'SUPPLIER') {
+    const businessId = this.extractBusinessId(req, headers);
     return this.partyService.findAll(businessId, type);
   }
 
   @Get(':id')
-  getPartyById(@Headers() headers, @Param('id') id: string) {
-    const businessId = this.extractBusinessId(headers);
+  getPartyById(@Req() req, @Headers() headers, @Param('id') id: string) {
+    const businessId = this.extractBusinessId(req, headers);
     return this.partyService.findOne(id, businessId);
   }
 
   @Post()
-  createParty(@Headers() headers, @Body() dto: CreatePartyDto) {
-    const businessId = this.extractBusinessId(headers);
+  createParty(@Req() req, @Headers() headers, @Body() dto: CreatePartyDto) {
+    const businessId = this.extractBusinessId(req, headers);
     return this.partyService.create(businessId, dto);
   }
 
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  deleteParty(@Headers() headers, @Param('id') id: string) {
-    const businessId = this.extractBusinessId(headers);
+  deleteParty(@Req() req, @Headers() headers, @Param('id') id: string) {
+    const businessId = this.extractBusinessId(req, headers);
     return this.partyService.delete(id, businessId);
   }
 }
+

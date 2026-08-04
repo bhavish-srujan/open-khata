@@ -11,6 +11,12 @@ export class User {
   @Column({ nullable: true })
   name: string;
 
+  @Column({ type: 'varchar', nullable: true })
+  currentOtp: string | null;
+
+  @Column({ type: 'timestamp', nullable: true })
+  otpExpiry: Date | null;
+
   @CreateDateColumn()
   created_at: Date;
 
