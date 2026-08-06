@@ -3,18 +3,13 @@ import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from '../users/user.entity';
-import { ConfigService } from '@nestjs/config';
-import { HttpService } from '@nestjs/axios';
-import { firstValueFrom } from 'rxjs';
+import { SmsService } from '../notifications/sms/sms.service';
 
 import { Business } from '../business/business.entity';
 
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
-  private readonly smsGatewayUrl: string;
-  private readonly smsGatewayUser: string;
-  private readonly smsGatewayPass: string;
 
   constructor(
     @InjectRepository(User)
@@ -22,19 +17,8 @@ export class AuthService {
     @InjectRepository(Business)
     private businessRepository: Repository<Business>,
     private jwtService: JwtService,
-    private configService: ConfigService,
-    private httpService: HttpService,
-  ) {
-    this.smsGatewayUrl = this.configService.get<string>('SMS_GATEWAY_URL') || '';
-    this.smsGatewayUser = this.configService.get<string>('SMS_GATEWAY_USERNAME') || '';
-    this.smsGatewayPass = this.configService.get<string>('SMS_GATEWAY_PASSWORD') || '';
-  }
-
-  private normalizeForGateway(value: string): string {
-    const digits = this.normalizePhoneForStorage(value);
-    if (!digits) return value;
-    return `+91${digits}`;
-  }
+    private smsService: SmsService,
+  ) {}
 
   private normalizePhoneForStorage(value: string): string {
     const digits = (value || '').replace(/\D/g, '');
@@ -44,22 +28,6 @@ export class AuthService {
     if (digits.length === 12 && digits.startsWith('91')) return digits.substring(2);
     if (digits.length === 13 && digits.startsWith('091')) return digits.substring(3);
     return digits;
-  }
-
-  private buildSmsGatewayUrl(): string {
-    const url = this.smsGatewayUrl.trim();
-    if (!url) return url;
-    try {
-      const parsed = new URL(url);
-      if (parsed.pathname === '' || parsed.pathname === '/') {
-        parsed.pathname = '/messages';
-      } else if (!parsed.pathname.endsWith('/messages')) {
-        parsed.pathname = parsed.pathname.replace(/\/$/, '') + '/messages';
-      }
-      return parsed.toString();
-    } catch {
-      return url.replace(/\/$/, '') + '/messages';
-    }
   }
 
   // Normalize and lookup user by phone number to handle different device formats
@@ -115,38 +83,24 @@ export class AuthService {
     user.otpExpiry = expiry;
     await this.userRepository.save(user);
 
-    if (!this.smsGatewayUrl) {
+    if (!this.smsService.isConfigured()) {
       this.logger.warn(`MOCK SMS: Requested OTP for ${phoneNumber}. Use ${generatedOtp} to verify.`);
       return { success: true, message: 'OTP Sent successfully (Mock)' };
     }
 
-    try {
-      const targetUrl = this.buildSmsGatewayUrl();
-      const payload = {
-        phoneNumbers: [this.normalizeForGateway(phoneNumber)],
-        message: `Your Khatabook verification code is: ${generatedOtp}. Valid for 10 minutes.`,
-      };
+    // Delegated to SmsService so the OTP payload cannot drift from the shape the
+    // other senders use. The wire format is unchanged.
+    const sent = await this.smsService.sendSms(
+      phoneNumber,
+      `Your Khatabook verification code is: ${generatedOtp}. Valid for 10 minutes.`,
+    );
 
-      const timeoutMs = Number(this.configService.get<number>('SMS_GATEWAY_TIMEOUT_MS') || 5000);
-
-      this.logger.debug(`Sending OTP to SMS gateway URL: ${targetUrl}`);
-      await firstValueFrom(
-        this.httpService.post(targetUrl, payload, {
-          headers: { 'Content-Type': 'application/json' },
-          timeout: timeoutMs,
-          auth: {
-            username: this.smsGatewayUser || '',
-            password: this.smsGatewayPass || '',
-          },
-        }),
-      );
-
-      return { success: true, message: 'OTP Sent successfully' };
-    } catch (error) {
-      const responseData = error?.response?.data || error?.message || 'unknown error';
-      this.logger.error('Error requesting OTP via Android SMS Gateway', responseData);
+    if (!sent) {
+      this.logger.error('Error requesting OTP via Android SMS Gateway');
       throw new BadRequestException('Failed to send OTP');
     }
+
+    return { success: true, message: 'OTP Sent successfully' };
   }
 
   async verifyOtp(phoneNumber: string, otp: string): Promise<{ access_token: string, is_new_user: boolean }> {

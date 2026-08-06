@@ -4,8 +4,7 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { User } from '../users/user.entity';
 import { Business } from '../business/business.entity';
 import { JwtService } from '@nestjs/jwt';
-import { ConfigService } from '@nestjs/config';
-import { HttpService } from '@nestjs/axios';
+import { SmsService } from '../notifications/sms/sms.service';
 
 describe('AuthService', () => {
   let service: AuthService;
@@ -23,8 +22,13 @@ describe('AuthService', () => {
         } },
         { provide: getRepositoryToken(Business), useValue: { findOneBy: jest.fn(), create: jest.fn(), save: jest.fn() } },
         { provide: JwtService, useValue: { signAsync: jest.fn().mockResolvedValue('tok') } },
-        { provide: ConfigService, useValue: { get: jest.fn() } },
-        { provide: HttpService, useValue: {} },
+        {
+          provide: SmsService,
+          useValue: {
+            isConfigured: jest.fn().mockReturnValue(false),
+            sendSms: jest.fn().mockResolvedValue(true),
+          },
+        },
       ],
     }).compile();
 

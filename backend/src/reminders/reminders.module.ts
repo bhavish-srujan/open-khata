@@ -3,11 +3,11 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { RemindersController } from './reminders.controller';
 import { RemindersService } from './reminders.service';
 import { CronSchedulerService } from './cron-scheduler.service';
-import { HttpModule } from '@nestjs/axios';
 import { Party } from '../party/party.entity';
 
+// SmsService comes from the global NotificationsModule.
 @Module({
-  imports: [HttpModule, TypeOrmModule.forFeature([Party])],
+  imports: [TypeOrmModule.forFeature([Party])],
   controllers: [RemindersController],
   providers: [RemindersService, CronSchedulerService]
 })

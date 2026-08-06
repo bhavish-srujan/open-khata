@@ -1,7 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { RemindersService } from './reminders.service';
-import { HttpService } from '@nestjs/axios';
-import { ConfigService } from '@nestjs/config';
+import { SmsService } from '../notifications/sms/sms.service';
 
 describe('RemindersService', () => {
   let service: RemindersService;
@@ -10,8 +9,13 @@ describe('RemindersService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         RemindersService,
-        { provide: HttpService, useValue: { post: jest.fn() } },
-        { provide: ConfigService, useValue: { get: jest.fn().mockReturnValue('') } },
+        {
+          provide: SmsService,
+          useValue: {
+            isConfigured: jest.fn().mockReturnValue(false),
+            sendSms: jest.fn().mockResolvedValue(true),
+          },
+        },
       ],
     }).compile();
 
