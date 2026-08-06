@@ -2,12 +2,14 @@ import { Controller, Get, Query, UseGuards, Request, Res } from '@nestjs/common'
 import type { Response } from 'express';
 import { ReportsService } from './reports.service';
 import { PdfService } from './pdf/pdf.service';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { UserRole } from '../users/user.entity';
 
+// JwtAuthGuard must run first: it populates req.user, which RolesGuard reads.
 @Controller('reports')
-@UseGuards(RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 export class ReportsController {
   constructor(
     private readonly reportsService: ReportsService,
@@ -21,7 +23,7 @@ export class ReportsController {
     @Query('startDate') startDateString: string,
     @Query('endDate') endDateString: string,
   ) {
-    const businessId = req.user?.businessId || 'biz_default';
+    const businessId = req.user.businessId;
     const startDate = startDateString ? new Date(startDateString) : new Date(new Date().setMonth(new Date().getMonth() - 1));
     const endDate = endDateString ? new Date(endDateString) : new Date();
     
@@ -35,7 +37,7 @@ export class ReportsController {
     @Query('startDate') startDateString: string,
     @Query('endDate') endDateString: string,
   ) {
-    const businessId = req.user?.businessId || 'biz_default';
+    const businessId = req.user.businessId;
     const startDate = startDateString ? new Date(startDateString) : new Date(new Date().setMonth(new Date().getMonth() - 1));
     const endDate = endDateString ? new Date(endDateString) : new Date();
     
@@ -51,7 +53,7 @@ export class ReportsController {
     @Query('startDate') startDateString?: string,
     @Query('endDate') endDateString?: string,
   ) {
-    const businessId = req.user?.businessId || 'biz_default';
+    const businessId = req.user.businessId;
     const startDate = startDateString ? new Date(startDateString) : new Date(new Date().setMonth(new Date().getMonth() - 1));
     const endDate = endDateString ? new Date(endDateString) : new Date();
     
