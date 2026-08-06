@@ -1,9 +1,12 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Party } from './party.entity';
 import { CreatePartyDto } from './dto/create-party.dto';
 import { SmsService } from '../notifications/sms/sms.service';
+
+/** Postgres unique_violation. */
+const POSTGRES_UNIQUE_VIOLATION = '23505';
 
 @Injectable()
 export class PartyService {
@@ -28,7 +31,16 @@ export class PartyService {
   }
 
   async create(businessId: string, dto: CreatePartyDto): Promise<Party> {
+    // The client may supply its own id (offline-first). Treat a repeat of an id
+    // we already hold as a replayed request and return the stored row unchanged,
+    // so retries neither duplicate the party nor re-send the welcome SMS.
+    if (dto.id) {
+      const existing = await this.findExistingForReplay(dto.id, businessId);
+      if (existing) return existing;
+    }
+
     const party = this.partyRepository.create({
+      id: dto.id,
       name: dto.name,
       phone: dto.phone,
       type: dto.type,
@@ -36,7 +48,18 @@ export class PartyService {
       businessId,
       currentBalance: 0,
     });
-    const savedParty = await this.partyRepository.save(party);
+
+    let savedParty: Party;
+    try {
+      savedParty = await this.partyRepository.save(party);
+    } catch (error) {
+      // Two concurrent creates of the same id: the loser gets a unique violation.
+      if (error?.code === POSTGRES_UNIQUE_VIOLATION && dto.id) {
+        const existing = await this.findExistingForReplay(dto.id, businessId);
+        if (existing) return existing;
+      }
+      throw error;
+    }
 
     // Send welcome SMS if phone number is provided
     if (savedParty.phone) {
@@ -47,6 +70,26 @@ export class PartyService {
     }
 
     return savedParty;
+  }
+
+  /**
+   * Resolves a client-supplied id to an existing row for idempotent replay.
+   *
+   * Returns the row when it already belongs to this business. If the id exists
+   * under a *different* business we reject with a bare 409 — echoing anything
+   * about that row would turn client-chosen ids into a cross-tenant existence
+   * oracle. Returns null when the id is genuinely new.
+   */
+  private async findExistingForReplay(
+    id: string,
+    businessId: string,
+  ): Promise<Party | null> {
+    const existing = await this.partyRepository.findOneBy({ id });
+    if (!existing) return null;
+    if (existing.businessId !== businessId) {
+      throw new ConflictException('Party id is already in use');
+    }
+    return existing;
   }
 
   async delete(id: string, businessId: string): Promise<void> {

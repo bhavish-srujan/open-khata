@@ -4,11 +4,23 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
+  IsUUID,
   Matches,
   MaxLength,
 } from 'class-validator';
 
 export class CreatePartyDto {
+  /**
+   * Optional client-generated primary key. The Android app is offline-first and
+   * mints a UUID locally so child ledger entries can reference the party before
+   * it has ever reached the server. Sending it here makes create idempotent:
+   * replaying the same id returns the existing row instead of inserting a
+   * duplicate. Omit it and the server generates one as before.
+   */
+  @IsOptional()
+  @IsUUID()
+  id?: string;
+
   @IsString()
   @IsNotEmpty()
   @MaxLength(120)

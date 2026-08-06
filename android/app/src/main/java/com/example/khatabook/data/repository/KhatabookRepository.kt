@@ -173,6 +173,7 @@ class KhatabookRepository(private val context: Context) {
             try {
                 NetworkClient.apiService.createParty(
                     CreatePartyRequest(
+                        id = newParty.id,
                         name = name,
                         phone = phone,
                         type = type.name,
@@ -261,6 +262,7 @@ class KhatabookRepository(private val context: Context) {
             try {
                 NetworkClient.apiService.createLedgerEntry(
                     CreateLedgerEntryRequest(
+                        id = newEntry.id,
                         partyId = partyId,
                         amount = amount,
                         type = type.name,

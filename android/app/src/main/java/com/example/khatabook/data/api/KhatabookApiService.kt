@@ -42,6 +42,12 @@ data class PartyResponse(
 
 @Keep
 data class CreatePartyRequest(
+    /**
+     * The locally-minted UUID. Sent so the server stores the same id we already
+     * use offline — child ledger entries then reference a party id the server
+     * recognises, and a retried create is a no-op rather than a duplicate.
+     */
+    val id: String,
     val name: String,
     val phone: String,
     val type: String,
@@ -64,6 +70,8 @@ data class LedgerEntryResponse(
 
 @Keep
 data class CreateLedgerEntryRequest(
+    /** Locally-minted UUID; makes a retried write idempotent server-side. */
+    val id: String,
     val partyId: String,
     val amount: Double,
     val type: String,        // "GAVE" or "GOT"

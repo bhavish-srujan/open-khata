@@ -1,4 +1,9 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { LedgerEntry } from './ledger-entry.entity';
@@ -38,6 +43,21 @@ export class LedgerService {
         throw new NotFoundException(`Party ${dto.partyId} not found in business`);
       }
 
+      // 1a. Idempotent replay. The client may supply its own id, so a retried
+      // write must return the stored entry and leave the balance alone —
+      // re-applying the delta here would double-count money. This runs while
+      // holding the party lock, so concurrent retries serialise behind it.
+      if (dto.id) {
+        const existing = await manager.findOneBy(LedgerEntry, { id: dto.id });
+        if (existing) {
+          if (existing.businessId !== businessId) {
+            // Bare 409: never confirm anything about another tenant's row.
+            throw new ConflictException('Ledger entry id is already in use');
+          }
+          return existing;
+        }
+      }
+
       const previousBalance = Number(party.currentBalance);
 
       // 2. Calculate delta
@@ -58,6 +78,7 @@ export class LedgerService {
 
       // 4. Create Ledger Entry
       const entry = manager.create(LedgerEntry, {
+        id: dto.id,
         businessId,
         partyId: dto.partyId,
         amount: dto.amount,
