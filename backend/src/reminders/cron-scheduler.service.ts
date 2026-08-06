@@ -18,22 +18,33 @@ export class CronSchedulerService {
   @Cron(CronExpression.EVERY_DAY_AT_9AM)
   async handleDailyReminders() {
     this.logger.debug('Running daily reminder check...');
-    // We assume any party with a negative balance (they owe money) and 
-    // a collection frequency that suggests they are due should get a reminder.
-    // In a real app, we would have a specific "dueDate" field in the Party or Bill.
-    // For now, we mock finding customers who owe money:
-    const overdueParties = await this.partyRepository
+
+    // Sign convention, as implemented by LedgerService.create:
+    //   CUSTOMER  GAVE -> +amount, GOT -> -amount, so POSITIVE means they owe us
+    //   SUPPLIER  GAVE -> -amount, GOT -> +amount, so POSITIVE means we owe them
+    // The app surfaces the same reading: PartiesScreen labels a customer with a
+    // positive balance "You will get".
+    //
+    // A collection reminder must therefore go to CUSTOMERs in credit to us.
+    // Suppliers are deliberately excluded: the sign is inverted for them, so
+    // including them would chase people we actually owe money to.
+    //
+    // There is still no due-date model — every customer in debit is reminded on
+    // each run, not only those genuinely overdue.
+    const partiesWhoOweUs = await this.partyRepository
       .createQueryBuilder('party')
-      .where('party.currentBalance < 0')
+      .where('party.type = :type', { type: 'CUSTOMER' })
+      .andWhere('party.currentBalance > 0')
       .getMany();
 
-    for (const party of overdueParties) {
-      this.logger.debug(`Sending automated reminder to ${party.name} (${party.phone}) for owing ${Math.abs(party.currentBalance)}`);
+    for (const party of partiesWhoOweUs) {
+      const amountOwed = Number(party.currentBalance);
+      this.logger.debug(`Sending automated reminder to ${party.name} (${party.phone}) for owing ${amountOwed}`);
       if (party.phone) {
         try {
           await this.remindersService.sendReminder(
             party.phone,
-            Math.abs(party.currentBalance),
+            amountOwed,
             party.name,
           );
         } catch (error) {

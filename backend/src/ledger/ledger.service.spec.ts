@@ -111,6 +111,30 @@ describe('LedgerService — idempotent create', () => {
     expect(Number(party.currentBalance)).toBe(500);
   });
 
+  // Pins the sign convention the reminder scheduler and the app's
+  // "You will get" / "You will give" labels both depend on.
+  describe('sign convention', () => {
+    it('CUSTOMER + GAVE is positive — they owe us', async () => {
+      await service.create(BUSINESS_A, { ...dto, type: 'GAVE' });
+
+      expect(Number(party.currentBalance)).toBeGreaterThan(0);
+    });
+
+    it('CUSTOMER + GOT is negative — we owe them', async () => {
+      await service.create(BUSINESS_A, { ...dto, type: 'GOT' });
+
+      expect(Number(party.currentBalance)).toBeLessThan(0);
+    });
+
+    it('SUPPLIER inverts it — GOT is positive, meaning we owe them', async () => {
+      party.type = 'SUPPLIER';
+
+      await service.create(BUSINESS_A, { ...dto, type: 'GOT' });
+
+      expect(Number(party.currentBalance)).toBeGreaterThan(0);
+    });
+  });
+
   it('does NOT re-apply the balance delta on replay', async () => {
     await service.create(BUSINESS_A, { ...dto, id: CLIENT_ID });
     await service.create(BUSINESS_A, { ...dto, id: CLIENT_ID });
