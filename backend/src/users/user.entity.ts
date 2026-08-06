@@ -32,6 +32,14 @@ export class User {
   @Column({ type: 'timestamp', nullable: true })
   otpExpiry: Date | null;
 
+  /**
+   * Failed verification attempts against the current OTP. Reset when a new code
+   * is issued or a login succeeds. Without this a six-digit code with a
+   * ten-minute window can simply be enumerated.
+   */
+  @Column({ type: 'int', default: 0 })
+  otpAttempts: number;
+
   @Column({ type: 'int', default: 1 })
   sessionVersion: number;
 

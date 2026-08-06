@@ -1,4 +1,12 @@
-import { Injectable, UnauthorizedException, Logger, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  UnauthorizedException,
+  Logger,
+  BadRequestException,
+  HttpException,
+  HttpStatus,
+} from '@nestjs/common';
+import { randomInt, timingSafeEqual } from 'node:crypto';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -6,6 +14,29 @@ import { User } from '../users/user.entity';
 import { SmsService } from '../notifications/sms/sms.service';
 
 import { Business } from '../business/business.entity';
+
+/** How long an issued OTP stays valid. */
+const OTP_TTL_MS = 10 * 60 * 1000;
+
+/** Minimum gap between OTP issues for one number. Also stops the attempt
+ *  counter being reset on demand. */
+const OTP_RESEND_COOLDOWN_MS = 60 * 1000;
+
+/** Wrong guesses before the code is burned and must be re-requested. */
+const MAX_OTP_ATTEMPTS = 5;
+
+/**
+ * Constant-time comparison, so response timing cannot be used to learn how much
+ * of a code was correct. Falls back to a plain false on length mismatch, which
+ * leaks only the length — already known, since every OTP is six digits.
+ */
+function timingSafeEquals(a: string | null, b: string | null): boolean {
+  if (!a || !b) return false;
+  const left = Buffer.from(a);
+  const right = Buffer.from(b);
+  if (left.length !== right.length) return false;
+  return timingSafeEqual(left, right);
+}
 
 @Injectable()
 export class AuthService {
@@ -65,22 +96,52 @@ export class AuthService {
     return null;
   }
 
+  /** Invalidates the current code so a new one must be requested. */
+  private async clearOtp(user: User): Promise<void> {
+    user.currentOtp = null;
+    user.otpExpiry = null;
+    user.otpAttempts = 0;
+    await this.userRepository.save(user);
+  }
+
   async requestOtp(phoneNumber: string): Promise<{ success: boolean, message: string }> {
     if (!phoneNumber) {
       throw new BadRequestException('Phone number is required');
     }
-
-    // Generate a 6-digit OTP
-    const generatedOtp = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiry = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes from now
 
     // Find or create user to store the OTP (try normalized lookup to handle formatting differences)
     let user = await this.findUserByPhone(phoneNumber);
     if (!user) {
       user = this.userRepository.create({ phone_number: phoneNumber, normalized_phone: this.normalizePhoneForStorage(phoneNumber) });
     }
+
+    // Refuse a rapid re-issue. This is not only anti-SMS-bombing: without it,
+    // an attacker who has burned the attempt budget could simply request a
+    // fresh code to reset otpAttempts and keep guessing indefinitely.
+    const issuedAt = user.otpExpiry
+      ? new Date(user.otpExpiry.getTime() - OTP_TTL_MS)
+      : null;
+    if (
+      user.currentOtp &&
+      issuedAt &&
+      Date.now() - issuedAt.getTime() < OTP_RESEND_COOLDOWN_MS
+    ) {
+      const waitSeconds = Math.ceil(
+        (OTP_RESEND_COOLDOWN_MS - (Date.now() - issuedAt.getTime())) / 1000,
+      );
+      throw new HttpException(
+        `Please wait ${waitSeconds}s before requesting another code.`,
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+
+    // Cryptographically random, not Math.random: OTPs are a credential.
+    const generatedOtp = randomInt(100000, 1000000).toString();
+    const expiry = new Date(Date.now() + OTP_TTL_MS);
+
     user.currentOtp = generatedOtp;
     user.otpExpiry = expiry;
+    user.otpAttempts = 0;
     await this.userRepository.save(user);
 
     if (!this.smsService.isConfigured()) {
@@ -114,17 +175,36 @@ export class AuthService {
        throw new UnauthorizedException('No OTP requested for this number');
     }
 
-    if (user.currentOtp !== otp) {
-       throw new UnauthorizedException('Invalid OTP');
+    // Expiry is checked before the code itself, so an expired OTP cannot be
+    // used to burn attempts, and the error is honest about why it failed.
+    if (user.otpExpiry && new Date() > user.otpExpiry) {
+       await this.clearOtp(user);
+       throw new UnauthorizedException('OTP has expired');
     }
 
-    if (user.otpExpiry && new Date() > user.otpExpiry) {
-       throw new UnauthorizedException('OTP has expired');
+    if (!timingSafeEquals(user.currentOtp, otp)) {
+       user.otpAttempts = (user.otpAttempts ?? 0) + 1;
+
+       if (user.otpAttempts >= MAX_OTP_ATTEMPTS) {
+         // Burn the code entirely. A fresh one must be requested, and the
+         // resend cooldown bounds how fast that can happen.
+         await this.clearOtp(user);
+         this.logger.warn(
+           `OTP locked out after ${MAX_OTP_ATTEMPTS} failed attempts for user ${user.id}`,
+         );
+         throw new UnauthorizedException(
+           'Too many incorrect attempts. Please request a new code.',
+         );
+       }
+
+       await this.userRepository.save(user);
+       throw new UnauthorizedException('Invalid OTP');
     }
 
     // OTP matched, clear it and increment session version
     user.currentOtp = null;
     user.otpExpiry = null;
+    user.otpAttempts = 0;
     user.sessionVersion = (user.sessionVersion || 1) + 1;
     // Ensure normalized_phone is persisted using the same storage normalization logic.
     user.normalized_phone = this.normalizePhoneForStorage(user.phone_number);
