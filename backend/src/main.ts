@@ -2,8 +2,8 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
-import { join } from 'path';
 import { auditContextMiddleware } from './audit-logs/audit-context';
+import { UPLOADS_ROOT } from './uploads/uploads.config';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
@@ -15,8 +15,9 @@ async function bootstrap() {
   app.enableCors();
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true }));
   
-  // Serve uploaded files statically
-  app.useStaticAssets(join(__dirname, '..', 'uploads'), {
+  // Serve uploaded files statically, from the same constant the upload
+  // controller writes to, so the two cannot drift apart again.
+  app.useStaticAssets(UPLOADS_ROOT, {
     prefix: '/uploads/',
   });
 

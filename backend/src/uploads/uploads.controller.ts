@@ -1,15 +1,27 @@
-import { Controller, Post, UseInterceptors, UploadedFile, BadRequestException } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  UseInterceptors,
+  UploadedFile,
+  UseGuards,
+  BadRequestException,
+} from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import { extname } from 'path';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { RECEIPTS_DIR } from './uploads.config';
 
+// Receipts are financial documents. This endpoint previously accepted uploads
+// from anyone who could reach the port.
+@UseGuards(JwtAuthGuard)
 @Controller('uploads')
 export class UploadsController {
-  
+
   @Post('receipt')
   @UseInterceptors(FileInterceptor('file', {
     storage: diskStorage({
-      destination: './uploads/receipts',
+      destination: RECEIPTS_DIR,
       filename: (req, file, cb) => {
         // Generate a random unique string for filename
         const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
