@@ -2,6 +2,19 @@ package com.example.khatabook.ui.components
 
 import com.example.khatabook.ui.components.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import android.graphics.Bitmap
+import android.net.Uri
+import android.content.Context
+import androidx.compose.ui.platform.LocalContext
+import com.example.khatabook.data.api.NetworkClient
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.MultipartBody
+import okhttp3.RequestBody.Companion.asRequestBody
+import java.io.File
+import java.io.FileOutputStream
+import java.util.UUID
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -62,42 +75,83 @@ fun SmartAiSheetScannerDialog(
     var editingRecordId by remember { mutableStateOf<String?>(null) }
     var editAmountText by remember { mutableStateOf("") }
     var editNameText by remember { mutableStateOf("") }
+    val context = LocalContext.current
+    var uploadError by remember { mutableStateOf<String?>(null) }
     
+    val extractedRecords = remember { mutableStateListOf<LedgerSheetRecord>() }
     val coroutineScope = rememberCoroutineScope()
-    
-    fun simulateScan() {
+
+    fun performScan(imagePart: MultipartBody.Part) {
         currentStep = 2 // 2 means scanning
+        uploadError = null
         coroutineScope.launch {
-            kotlinx.coroutines.delay(2000)
-            currentStep = 3 // 3 means extracted
+            try {
+                val response = withContext(Dispatchers.IO) {
+                    NetworkClient.apiService.extractLedger(imagePart)
+                }
+                
+                if (response.isSuccessful) {
+                    val data = response.body()
+                    if (data != null) {
+                        sheetDate = data.date.takeIf { it.isNotBlank() } ?: "Unknown Date"
+                        extractedRecords.clear()
+                        
+                        data.records.forEach { extracted ->
+                            // Try to find a matching party (exact match or partial match)
+                            val matchedParty = parties.find { 
+                                it.name.equals(extracted.customerName, ignoreCase = true) 
+                            } ?: parties.find { 
+                                it.name.contains(extracted.customerName, ignoreCase = true) || 
+                                extracted.customerName.contains(it.name, ignoreCase = true)
+                            }
+                            
+                            val finalName = matchedParty?.name ?: extracted.customerName
+                            
+                            extractedRecords.add(
+                                LedgerSheetRecord(
+                                    id = UUID.randomUUID().toString(),
+                                    date = data.date,
+                                    customerCodeOrName = finalName,
+                                    amountCollected = extracted.amount,
+                                    isSelected = true
+                                )
+                            )
+                        }
+                        currentStep = 3 // Success, show extracted data
+                    } else {
+                        uploadError = "AI failed to process the image."
+                        currentStep = 1 // Go back to start
+                    }
+                } else {
+                    val serverMessage = response.errorBody()?.string()?.takeIf { it.isNotBlank() }
+                    uploadError = when {
+                        response.code() == 401 -> "Authentication failed. Please log in again."
+                        serverMessage != null -> "Server error ${response.code()}: $serverMessage"
+                        else -> "Failed to connect to AI server (HTTP ${response.code()}). Check backend URL and network connectivity."
+                    }
+                    currentStep = 1
+                }
+            } catch (e: Exception) {
+                uploadError = "Error: ${e.message}"
+                currentStep = 1
+            }
         }
     }
 
     val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicturePreview()) { bitmap ->
-        selectedSource = if (bitmap != null) "Camera Capture" else "Sample Scan"
-        simulateScan()
+        if (bitmap != null) {
+            selectedSource = "Camera Capture"
+            val part = bitmapToMultipart(context, bitmap)
+            if (part != null) performScan(part) else uploadError = "Failed to process photo"
+        }
     }
 
     val galleryLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        selectedSource = if (uri != null) "Gallery Image Upload" else "Sample Scan"
-        simulateScan()
-    }
-
-    val extractedRecords = remember {
-        mutableStateListOf(
-            LedgerSheetRecord("1", "21/01/2024", "Pndi", 5000.0),
-            LedgerSheetRecord("2", "21/01/2024", "CB28", 50.0),
-            LedgerSheetRecord("3", "21/01/2024", "Pazu", 500.0),
-            LedgerSheetRecord("4", "21/01/2024", "B222", 500.0),
-            LedgerSheetRecord("5", "21/01/2024", "Ind61", 500.0),
-            LedgerSheetRecord("6", "21/01/2024", "Ind52", 100.0),
-            LedgerSheetRecord("7", "21/01/2024", "Naveen", 1000.0),
-            LedgerSheetRecord("8", "21/01/2024", "Ramesh Kumar", 1200.0),
-            LedgerSheetRecord("9", "21/01/2024", "Vikram Singh", 2500.0),
-            LedgerSheetRecord("10", "21/01/2024", "B26", 500.0),
-            LedgerSheetRecord("11", "21/01/2024", "B221", 300.0),
-            LedgerSheetRecord("12", "21/01/2024", "CR54", 200.0)
-        )
+        if (uri != null) {
+            selectedSource = "Gallery Image Upload"
+            val part = uriToMultipart(context, uri)
+            if (part != null) performScan(part) else uploadError = "Failed to read image"
+        }
     }
 
     val selectedCount by remember { derivedStateOf { extractedRecords.count { it.isSelected } } }
@@ -129,7 +183,7 @@ fun SmartAiSheetScannerDialog(
                         }
                         Spacer(modifier = Modifier.width(8.dp))
                         Column {
-                            Text("AI Ledger Sheet Scanner", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = KhatabookTextDark)
+                            Text("Scan Khata", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = KhatabookTextDark)
                             Text(
                                 text = when (currentStep) {
                                     1 -> "Select Image Source"
@@ -162,7 +216,7 @@ fun SmartAiSheetScannerDialog(
                                 try {
                                     cameraLauncher.launch(null)
                                 } catch (e: Exception) {
-                                    simulateScan()
+                                    uploadError = "Camera not available"
                                 }
                             },
                         shape = RoundedCornerShape(10.dp),
@@ -188,7 +242,7 @@ fun SmartAiSheetScannerDialog(
                                 try {
                                     galleryLauncher.launch("image/*")
                                 } catch (e: Exception) {
-                                    simulateScan()
+                                    uploadError = "Gallery not available"
                                 }
                             },
                         shape = RoundedCornerShape(10.dp),
@@ -203,6 +257,17 @@ fun SmartAiSheetScannerDialog(
                                 Text("Choose an existing ledger page photo from phone gallery", fontSize = 11.sp, color = KhatabookTextMuted)
                             }
                         }
+                    }
+                    
+                    if (uploadError != null) {
+                        Spacer(modifier = Modifier.height(14.dp))
+                        Text(
+                            text = uploadError ?: "",
+                            fontSize = 12.sp,
+                            color = Color.Red,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.fillMaxWidth()
+                        )
                     }
                 } else if (currentStep == 2) {
                     // Step 2: Scanning Loading State
@@ -413,5 +478,34 @@ fun SmartAiSheetScannerDialog(
                 }
             }
         }
+    }
+}
+
+fun uriToMultipart(context: Context, uri: Uri): MultipartBody.Part? {
+    return try {
+        val inputStream = context.contentResolver.openInputStream(uri) ?: return null
+        val tempFile = File(context.cacheDir, "scan_${UUID.randomUUID()}.jpg")
+        val outputStream = FileOutputStream(tempFile)
+        inputStream.copyTo(outputStream)
+        outputStream.close()
+        inputStream.close()
+        val requestFile = tempFile.asRequestBody("image/jpeg".toMediaTypeOrNull())
+        MultipartBody.Part.createFormData("image", tempFile.name, requestFile)
+    } catch (e: Exception) {
+        null
+    }
+}
+
+fun bitmapToMultipart(context: Context, bitmap: Bitmap): MultipartBody.Part? {
+    return try {
+        val tempFile = File(context.cacheDir, "scan_${UUID.randomUUID()}.jpg")
+        val outputStream = FileOutputStream(tempFile)
+        bitmap.compress(Bitmap.CompressFormat.JPEG, 90, outputStream)
+        outputStream.flush()
+        outputStream.close()
+        val requestFile = tempFile.asRequestBody("image/jpeg".toMediaTypeOrNull())
+        MultipartBody.Part.createFormData("image", tempFile.name, requestFile)
+    } catch (e: Exception) {
+        null
     }
 }

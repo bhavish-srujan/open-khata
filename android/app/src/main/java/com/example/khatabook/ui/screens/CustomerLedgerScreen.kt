@@ -24,6 +24,8 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Message
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Notifications
 import android.widget.Toast
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -56,6 +58,7 @@ fun CustomerLedgerScreen(
     onDeleteParty: (partyId: String) -> Unit = {},
     onEditEntry: (entryId: String, newAmount: Double, newNote: String) -> Unit = { _, _, _ -> },
     onDeleteEntry: (entryId: String) -> Unit = {},
+    onViewProfileClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     // Removed redundant BackHandler; MainActivity handles navStack popping centrally
@@ -80,7 +83,7 @@ fun CustomerLedgerScreen(
                 Box(modifier = Modifier.statusBarsPadding()) {
                     TopAppBar(
                         title = {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                                 Box(
                                     modifier = Modifier
                                         .size(36.dp)
@@ -96,9 +99,15 @@ fun CustomerLedgerScreen(
                                     )
                                 }
                                 Spacer(modifier = Modifier.width(10.dp))
-                                Column {
-                                    Text(party.name, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                                    Text(party.phone, color = Color.White.copy(alpha = 0.8f), fontSize = 11.sp)
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(party.name, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Box(modifier = Modifier.background(Color.White.copy(alpha = 0.2f), RoundedCornerShape(4.dp)).padding(horizontal = 4.dp, vertical = 2.dp)) {
+                                            Text("Customer", color = Color.White, fontSize = 10.sp)
+                                        }
+                                    }
+                                    Text("View settings >", color = Color.White.copy(alpha = 0.8f), fontSize = 11.sp, modifier = Modifier.clickable { onViewProfileClick() })
                                 }
                             }
                         },
@@ -108,19 +117,7 @@ fun CustomerLedgerScreen(
                             }
                         },
                         actions = {
-                            BounceIconButton(onClick = {
-                                try {
-                                    val callIntent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:${party.phone}"))
-                                    context.startActivity(callIntent)
-                                } catch (e: Exception) {
-                                    android.widget.Toast.makeText(context, "No Phone App found", android.widget.Toast.LENGTH_SHORT).show()
-                                }
-                            }) {
-                                Icon(Icons.Default.Call, contentDescription = "Call", tint = Color.White)
-                            }
-                            BounceIconButton(onClick = { showDeleteStep1Dialog = true }) {
-                                Icon(Icons.Default.Delete, contentDescription = "Delete Customer", tint = Color.White)
-                            }
+                            // Top actions removed to match screenshot
                         },
                         colors = TopAppBarDefaults.topAppBarColors(containerColor = KhatabookHeaderBlue)
                     )
@@ -186,56 +183,93 @@ fun CustomerLedgerScreen(
                 .padding(paddingValues)
                 .background(KhatabookBgLight)
         ) {
-            // Net Balance Header Banner
+            // Net Balance Header Banner & Actions
             Surface(
                 color = Color.White,
                 shadowElevation = 1.dp,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp)
                 ) {
-                    Column {
-                        Text("Net Balance", fontSize = 12.sp, color = KhatabookTextMuted)
-                        val isGet = party.currentBalance > 0
+                    val isGet = party.currentBalance > 0
+                    val isGive = party.currentBalance < 0
+                    val balanceAmount = kotlin.math.abs(party.currentBalance).toInt()
+                    
+                    // Main Balance Banner
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp)
+                            .background(
+                                color = if (isGet) KhatabookGotGreen.copy(alpha = 0.1f) 
+                                        else if (isGive) KhatabookGiveRed.copy(alpha = 0.1f) 
+                                        else Color(0xFFF3F4F6),
+                                shape = RoundedCornerShape(8.dp)
+                            )
+                            .padding(12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Text(
-                            text = "₹ ${kotlin.math.abs(party.currentBalance).toInt()}",
-                            fontSize = 20.sp,
+                            text = if (isGet) "You will get" else if (isGive) "You will give" else "Settled up",
+                            fontSize = 14.sp,
                             fontWeight = FontWeight.Bold,
-                            color = if (party.currentBalance == 0.0) KhatabookTextDark else if (isGet) KhatabookGiveRed else KhatabookGotGreen
+                            color = if (isGet) KhatabookGotGreen else if (isGive) KhatabookGiveRed else KhatabookTextDark
+                        )
+                        Text(
+                            text = "₹ $balanceAmount",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (isGet) KhatabookGotGreen else if (isGive) KhatabookGiveRed else KhatabookTextDark
                         )
                     }
 
-                    Row {
-                        BounceOutlinedButton(
-                            onClick = { showRemindBottomSheet = true },
-                            shape = RoundedCornerShape(6.dp),
-                            colors = ButtonDefaults.outlinedButtonColors(containerColor = Color.White),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, KhatabookHeaderBlue),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Collection Reminder
+                    if (isGet) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(Icons.Default.Message, contentDescription = null, tint = KhatabookHeaderBlue, modifier = Modifier.size(14.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Remind", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = KhatabookHeaderBlue)
+                            Text("Set collection reminder", fontSize = 12.sp, color = KhatabookTextDark)
+                            Text(
+                                "SET DATE", 
+                                fontSize = 12.sp, 
+                                fontWeight = FontWeight.Bold, 
+                                color = KhatabookHeaderBlue,
+                                modifier = Modifier.clickable { /* Handle Set Date */ }
+                            )
                         }
-                        
-                        Spacer(modifier = Modifier.width(8.dp))
-                        
-                        BounceOutlinedButton(
-                            onClick = { showBillPdfDialog = true },
-                            shape = RoundedCornerShape(6.dp),
-                            colors = ButtonDefaults.outlinedButtonColors(containerColor = Color.White),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, KhatabookHeaderBlue),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
-                        ) {
-                            Icon(Icons.Default.Share, contentDescription = null, tint = KhatabookHeaderBlue, modifier = Modifier.size(14.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Bill", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = KhatabookHeaderBlue)
-                        }
+                        Spacer(modifier = Modifier.height(16.dp))
+                    }
+
+                    Divider(color = Color(0xFFF1F5F9))
+
+                    // 3 Quick Actions
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 12.dp),
+                        horizontalArrangement = Arrangement.SpaceEvenly
+                    ) {
+                        QuickActionButton(icon = Icons.Default.Description, label = "Report", onClick = { showBillPdfDialog = true })
+                        QuickActionButton(icon = Icons.Default.Notifications, label = "Reminder", onClick = { showRemindBottomSheet = true })
+                        QuickActionButton(icon = Icons.Default.Message, label = "SMS", onClick = {
+                            try {
+                                val message = "Dear ${party.name}, your total outstanding balance is ₹ $balanceAmount. Please clear your dues on Khatabook."
+                                val smsIntent = Intent(Intent.ACTION_VIEW, Uri.parse("sms:${party.phone}")).apply {
+                                    putExtra("sms_body", message)
+                                }
+                                context.startActivity(smsIntent)
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "No SMS app found", Toast.LENGTH_SHORT).show()
+                            }
+                        })
                     }
                 }
             }
@@ -564,5 +598,28 @@ fun CustomerLedgerScreen(
                 }
             )
         }
+    }
+}
+
+@Composable
+fun QuickActionButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    onClick: () -> Unit
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.clickable(onClick = onClick).padding(8.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(48.dp)
+                .background(Color(0xFFF1F5F9), CircleShape),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(icon, contentDescription = label, tint = KhatabookHeaderBlue, modifier = Modifier.size(24.dp))
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(label, fontSize = 12.sp, color = KhatabookTextDark)
     }
 }

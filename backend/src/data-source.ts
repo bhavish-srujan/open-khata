@@ -8,9 +8,14 @@ import { BalanceHistory } from './ledger/balance-history.entity';
 
 config(); // Load .env
 
+const databaseUrl = process.env.DATABASE_URL;
+if (!databaseUrl) {
+  throw new Error('DATABASE_URL is required. Set DATABASE_URL in your environment configuration.');
+}
+
 export const AppDataSource = new DataSource({
   type: 'postgres',
-  url: process.env.DATABASE_URL || 'postgresql://postgres:password@localhost:5432/khatabook',
+  url: databaseUrl,
   synchronize: false,
   logging: true,
   entities: [User, Party, LedgerEntry, Business, BalanceHistory],

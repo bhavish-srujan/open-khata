@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ScheduleModule } from '@nestjs/schedule';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -14,21 +15,39 @@ import { Party } from './party/party.entity';
 import { LedgerEntry } from './ledger/ledger-entry.entity';
 import { RemindersModule } from './reminders/reminders.module';
 import { ScanningModule } from './scanning/scanning.module';
+import { UsersModule } from './users/users.module';
+import { BillsModule } from './bills/bills.module';
+import { InventoryModule } from './inventory/inventory.module';
+import { ReportsModule } from './reports/reports.module';
+import { AuditLogsModule } from './audit-logs/audit-logs.module';
+import { HealthController } from './health/health.controller';
+import { UploadsModule } from './uploads/uploads.module';
+import { Item } from './inventory/item.entity';
+import { AuditLog } from './audit-logs/audit-log.entity';
+import { Bill } from './bills/entities/bill.entity';
+import { NotificationsModule } from './notifications/notifications.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
     }),
+    ScheduleModule.forRoot(),
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: (configService: ConfigService) => ({
-        type: 'postgres',
-        url: configService.get<string>('DATABASE_URL') || 'postgresql://postgres:password@localhost:5432/khatabook',
-        entities: [User, Party, LedgerEntry, Business, BalanceHistory],
-        synchronize: configService.get<string>('NODE_ENV') !== 'production', // Use migrations in production
-      }),
+      useFactory: (configService: ConfigService) => {
+        const databaseUrl = configService.get<string>('DATABASE_URL');
+        if (!databaseUrl && configService.get<string>('NODE_ENV') === 'production') {
+          throw new Error('DATABASE_URL is required in production. Set DATABASE_URL in your environment configuration.');
+        }
+        return {
+          type: 'postgres',
+          url: databaseUrl || 'postgresql://postgres:password@localhost:5432/khatabook',
+          entities: [User, Party, LedgerEntry, Business, BalanceHistory, Item, AuditLog, Bill],
+          synchronize: configService.get<string>('NODE_ENV') !== 'production', // Use migrations in production
+        };
+      },
     }),
     AuthModule,
     BusinessModule,
@@ -36,8 +55,15 @@ import { ScanningModule } from './scanning/scanning.module';
     LedgerModule,
     RemindersModule,
     ScanningModule,
+    UsersModule,
+    BillsModule,
+    InventoryModule,
+    ReportsModule,
+    AuditLogsModule,
+    UploadsModule,
+    NotificationsModule,
   ],
-  controllers: [AppController],
+  controllers: [AppController, HealthController],
   providers: [AppService],
 })
 export class AppModule {}

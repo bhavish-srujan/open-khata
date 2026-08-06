@@ -67,6 +67,7 @@ enum class AppScreen {
     USER_DETAILS,
     PARTIES,
     CUSTOMER_LEDGER,
+    CUSTOMER_PROFILE,
     CUSTOMER_CONTACT_PICKER,
     ADD_PARTY,
     CASHBOOK,
@@ -97,7 +98,7 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         
         // Prevent screenshots and screen recording
-        window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
+        // window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
 
         repository = KhatabookRepository(applicationContext)
 
@@ -178,12 +179,20 @@ class MainActivity : AppCompatActivity() {
                     val parties by repository.parties.collectAsState()
                     val entries by repository.ledgerEntries.collectAsState()
 
-                    var selectedLanguage by remember { mutableStateOf<AppLanguage>(availableLanguages[0]) }
-                    var authenticatedPhone by remember { mutableStateOf(prefs.getString("auth_phone", "") ?: "") }
+                    fun normalizePhoneForKey(value: String): String {
+                        val digits = value.replace(Regex("\\D"), "")
+                        if (digits.length == 10) return digits
+                        if (digits.length == 11 && digits.startsWith("0")) return digits.substring(1)
+                        if (digits.length == 12 && digits.startsWith("91")) return digits.substring(2)
+                        if (digits.length == 13 && digits.startsWith("091")) return digits.substring(3)
+                        return digits
+                    }
+
+                    var authenticatedPhone by remember { mutableStateOf(normalizePhoneForKey(prefs.getString("auth_phone", "") ?: "")) }
                     val loggedInPhones = remember {
                         val str = prefs.getString("logged_in_phones_list", null)
                         val phones = if (str != null && str.isNotBlank()) {
-                            str.split(",")
+                            str.split(",").map { normalizePhoneForKey(it) }.filter { it.isNotBlank() }.distinct()
                         } else {
                             if (authenticatedPhone.isNotBlank()) listOf(authenticatedPhone) else emptyList()
                         }
@@ -193,13 +202,38 @@ class MainActivity : AppCompatActivity() {
                     var phoneNumberToVerify by remember { mutableStateOf("") }
                     var firebaseVerificationId by remember { mutableStateOf("") }
 
+                    fun userPrefKey(key: String, phone: String?): String {
+                        return if (!phone.isNullOrBlank()) "${key}_$phone" else key
+                    }
+
+                    fun getUserPref(key: String, phone: String?, default: String): String {
+                        val perUserKey = userPrefKey(key, phone)
+                        val perUserValue = prefs.getString(perUserKey, null)
+                        if (!perUserValue.isNullOrBlank()) return perUserValue
+                        // Migrate legacy global value for the currently authenticated account.
+                        val globalValue = prefs.getString(key, null)
+                        if (!globalValue.isNullOrBlank() && phone != null && phone == prefs.getString("auth_phone", null)) {
+                            prefs.edit().putString(perUserKey, globalValue).apply()
+                            return globalValue
+                        }
+                        return prefs.getString(key, default) ?: default
+                    }
+
+                    fun setUserPref(key: String, phone: String?, value: String) {
+                        if (!phone.isNullOrBlank()) {
+                            prefs.edit().putString(userPrefKey(key, phone), value).apply()
+                        } else {
+                            prefs.edit().putString(key, value).apply()
+                        }
+                    }
+
                     LaunchedEffect(authenticatedPhone) {
                         if (authenticatedPhone.isNotBlank()) {
                             repository.switchUser(authenticatedPhone)
                         }
                     }
 
-                    var userName by remember { mutableStateOf(prefs.getString("user_name", "User") ?: "User") }
+                    var userName by remember(authenticatedPhone) { mutableStateOf(getUserPref("user_name", authenticatedPhone, "User")) }
                     var activePartyForLedger by remember { mutableStateOf<Party?>(null) }
 
                     // App Lock State
@@ -216,12 +250,18 @@ class MainActivity : AppCompatActivity() {
                     // Multiple Business Accounts
                     val businesses = remember {
                         mutableStateListOf(
-                            BusinessAccount("biz_1", prefs.getString("business_name", "My Business") ?: "My Business", "Retail Store", true)
+                            BusinessAccount("biz_1", getUserPref("business_name", authenticatedPhone, "My Business"), "Retail Store", true)
                         )
                     }
                     var selectedBusinessId by remember { mutableStateOf("biz_1") }
                     val activeBusiness = remember(businesses, selectedBusinessId) {
                         businesses.find { it.id == selectedBusinessId } ?: businesses.first()
+                    }
+
+                    // App language selection (persisted per-user)
+                    var selectedLanguage by remember(authenticatedPhone) {
+                        val savedLangId = getUserPref("app_language", authenticatedPhone, availableLanguages[0].id)
+                        mutableStateOf(availableLanguages.find { it.id == savedLangId } ?: availableLanguages[0])
                     }
 
                     fun updateLoginState(loggedIn: Boolean) {
@@ -241,6 +281,7 @@ class MainActivity : AppCompatActivity() {
                                     LanguageSelectionScreen(
                                         onLanguageSelected = { lang ->
                                             selectedLanguage = lang
+                                            setUserPref("app_language", authenticatedPhone, lang.id)
                                             if (isUserLoggedIn) {
                                                 navStack.clear()
                                                 navStack.add(AppScreen.PARTIES)
@@ -286,28 +327,40 @@ class MainActivity : AppCompatActivity() {
                                         verificationId = firebaseVerificationId,
                                         onBackClick = { navigateBack() },
                                         onVerifySuccess = { accessToken, isNewUser ->
-                                            // Persist JWT so NetworkClient picks it up immediately
+                                            val normalizedPhone = normalizePhoneForKey(phoneNumberToVerify)
+                                            // Persist JWT so NetworkClient picks it up immediately.
+                                            // Do NOT persist `auth_phone` yet — read per-user prefs first so
+                                            // legacy global values are NOT migrated into a brand-new phone.
                                             prefs.edit()
-                                                .putString("jwt_token_$phoneNumberToVerify", accessToken)
+                                                .putString("jwt_token_$normalizedPhone", accessToken)
                                                 .putString("jwt_token", accessToken)
-                                                .putString("auth_phone", phoneNumberToVerify)
                                                 .apply()
-                                            
-                                            authenticatedPhone = phoneNumberToVerify
 
-                                            if (!loggedInPhones.contains(phoneNumberToVerify)) {
-                                                loggedInPhones.add(phoneNumberToVerify)
+                                            // Update in-memory authenticated phone and read per-user prefs
+                                            // before mutating `auth_phone` in storage (prevents accidental
+                                            // migration of global values belonging to a different user).
+                                            authenticatedPhone = normalizedPhone
+                                            userName = getUserPref("user_name", authenticatedPhone, "User")
+                                            val businessName = getUserPref("business_name", authenticatedPhone, "My Business")
+                                            businesses[0] = businesses[0].copy(name = businessName)
+
+                                            // Now persist the active auth phone in secure prefs
+                                            prefs.edit().putString("auth_phone", normalizedPhone).apply()
+
+                                            if (!loggedInPhones.contains(normalizedPhone)) {
+                                                loggedInPhones.add(normalizedPhone)
                                                 prefs.edit().putString("logged_in_phones_list", loggedInPhones.joinToString(",")).apply()
                                             }
 
-                                            repository.switchUser(phoneNumberToVerify)
+                                            repository.switchUser(authenticatedPhone)
                                             updateLoginState(true)
                                             // Pull the latest party list from the server
                                             coroutineScope.launch {
                                                 repository.syncPartiesFromServer()
                                             }
                                             navStack.clear()
-                                            if (isNewUser) {
+                                            val hasSavedProfile = getUserPref("user_name", authenticatedPhone, "").isNotBlank()
+                                            if (isNewUser && !hasSavedProfile) {
                                                 navStack.add(AppScreen.USER_DETAILS)
                                             } else {
                                                 navStack.add(AppScreen.PARTIES)
@@ -320,13 +373,13 @@ class MainActivity : AppCompatActivity() {
                                     UserDetailsScreen(
                                         onDetailsSubmitted = { name, bizName, category ->
                                             userName = name
-                                            prefs.edit().putString("user_name", name).apply()
+                                            setUserPref("user_name", authenticatedPhone, name)
                                             updateLoginState(true)
                                             if (bizName.isNotBlank()) {
                                                 businesses[0] = businesses[0].copy(name = bizName)
                                                 val b = businesses[0]
                                                 businesses[0] = b.copy(name = bizName)
-                                                prefs.edit().putString("business_name", bizName).apply()
+                                                setUserPref("business_name", authenticatedPhone, bizName)
                                             }
                                             navStack.clear()
                                             // Show permissions after user details if not already shown
@@ -394,6 +447,22 @@ class MainActivity : AppCompatActivity() {
                                         },
                                         onDeleteEntry = { entryId ->
                                             repository.deleteLedgerEntry(entryId)
+                                        },
+                                        onViewProfileClick = { navigateTo(AppScreen.CUSTOMER_PROFILE) }
+                                    )
+                                }
+
+                                AppScreen.CUSTOMER_PROFILE -> {
+                                    val currentParty = activePartyForLedger ?: parties.firstOrNull() ?: Party(id = "cust_1", name = "Customer", phone = "+91 99999 88888")
+                                    val updatedParty = parties.find { it.id == currentParty.id } ?: currentParty
+                                    
+                                    com.example.khatabook.ui.screens.CustomerProfileScreen(
+                                        party = updatedParty,
+                                        onBackClick = { navigateBack() },
+                                        onDeleteParty = { partyId ->
+                                            repository.deleteParty(partyId)
+                                            navStack.removeAll { it == AppScreen.CUSTOMER_PROFILE || it == AppScreen.CUSTOMER_LEDGER }
+                                            if (navStack.isEmpty()) navStack.add(AppScreen.PARTIES)
                                         }
                                     )
                                 }
@@ -485,6 +554,8 @@ class MainActivity : AppCompatActivity() {
                                         onHelpSupportClick = { navigateTo(AppScreen.HELP_SUPPORT) },
                                         onAboutUsClick = { navigateTo(AppScreen.ABOUT_US) },
                                         businessName = activeBusiness.name,
+                                        userName = userName,
+                                        phoneNumber = authenticatedPhone,
                                         selectedLanguageName = selectedLanguage.nameInNative
                                     )
                                 }

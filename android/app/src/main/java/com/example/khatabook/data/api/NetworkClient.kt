@@ -7,8 +7,9 @@ import retrofit2.converter.gson.GsonConverterFactory
 import java.util.concurrent.TimeUnit
 
 object NetworkClient {
-    // Pointing to live Render backend
-    private const val BASE_URL = "https://khata-book-zirg.onrender.com/"
+    // Default backend address for emulator testing. For a physical device, change this in Developer Settings.
+    var BASE_URL = "http://10.0.2.2:3000/"
+        private set
 
     /**
      * Set this before the first network call (e.g. in MainActivity.onCreate).
@@ -35,15 +36,24 @@ object NetworkClient {
             .build()
     }
 
-    private val retrofit: Retrofit by lazy {
-        Retrofit.Builder()
-            .baseUrl(BASE_URL)
+    private var retrofit: Retrofit = buildRetrofit(BASE_URL)
+
+    private fun buildRetrofit(url: String): Retrofit {
+        // Ensure URL ends with /
+        val safeUrl = if (url.endsWith("/")) url else "$url/"
+        return Retrofit.Builder()
+            .baseUrl(safeUrl)
             .client(okHttpClient)
             .addConverterFactory(GsonConverterFactory.create())
             .build()
     }
 
-    val apiService: KhatabookApiService by lazy {
-        retrofit.create(KhatabookApiService::class.java)
+    var apiService: KhatabookApiService = retrofit.create(KhatabookApiService::class.java)
+        private set
+
+    fun updateBaseUrl(newUrl: String) {
+        BASE_URL = newUrl
+        retrofit = buildRetrofit(newUrl)
+        apiService = retrofit.create(KhatabookApiService::class.java)
     }
 }

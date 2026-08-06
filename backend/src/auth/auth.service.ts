@@ -30,6 +30,73 @@ export class AuthService {
     this.smsGatewayPass = this.configService.get<string>('SMS_GATEWAY_PASSWORD') || '';
   }
 
+  private normalizeForGateway(value: string): string {
+    const digits = this.normalizePhoneForStorage(value);
+    if (!digits) return value;
+    return `+91${digits}`;
+  }
+
+  private normalizePhoneForStorage(value: string): string {
+    const digits = (value || '').replace(/\D/g, '');
+    if (!digits) return '';
+    if (digits.length === 10) return digits;
+    if (digits.length === 11 && digits.startsWith('0')) return digits.substring(1);
+    if (digits.length === 12 && digits.startsWith('91')) return digits.substring(2);
+    if (digits.length === 13 && digits.startsWith('091')) return digits.substring(3);
+    return digits;
+  }
+
+  private buildSmsGatewayUrl(): string {
+    const url = this.smsGatewayUrl.trim();
+    if (!url) return url;
+    try {
+      const parsed = new URL(url);
+      if (parsed.pathname === '' || parsed.pathname === '/') {
+        parsed.pathname = '/messages';
+      } else if (!parsed.pathname.endsWith('/messages')) {
+        parsed.pathname = parsed.pathname.replace(/\/$/, '') + '/messages';
+      }
+      return parsed.toString();
+    } catch {
+      return url.replace(/\/$/, '') + '/messages';
+    }
+  }
+
+  // Normalize and lookup user by phone number to handle different device formats
+  public async findUserByPhone(phoneNumber: string): Promise<User | null> {
+    if (!phoneNumber) return null;
+    const normalized = this.normalizePhoneForStorage(phoneNumber);
+    if (!normalized) return null;
+
+    const byNormalized = await this.userRepository.findOneBy({ normalized_phone: normalized });
+    if (byNormalized) return byNormalized;
+
+    const byRaw = await this.userRepository.findOneBy({ phone_number: phoneNumber });
+    if (byRaw) {
+      if (byRaw.normalized_phone !== normalized) {
+        byRaw.normalized_phone = normalized;
+        await this.userRepository.save(byRaw);
+      }
+      return byRaw;
+    }
+
+    // Fallback: match against any stored phone_number after stripping non-digit characters.
+    // This handles legacy values like '+91 63666 05032', '0 6366605032', or formatted input.
+    const byDigitsRaw = await this.userRepository.createQueryBuilder('user')
+      .where('regexp_replace(user.phone_number, \'\\D\', \'\', \'g\') = :normalized', { normalized })
+      .getOne();
+
+    if (byDigitsRaw) {
+      if (byDigitsRaw.normalized_phone !== normalized) {
+        byDigitsRaw.normalized_phone = normalized;
+        await this.userRepository.save(byDigitsRaw);
+      }
+      return byDigitsRaw;
+    }
+
+    return null;
+  }
+
   async requestOtp(phoneNumber: string): Promise<{ success: boolean, message: string }> {
     if (!phoneNumber) {
       throw new BadRequestException('Phone number is required');
@@ -39,10 +106,10 @@ export class AuthService {
     const generatedOtp = Math.floor(100000 + Math.random() * 900000).toString();
     const expiry = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes from now
 
-    // Find or create user to store the OTP
-    let user = await this.userRepository.findOneBy({ phone_number: phoneNumber });
+    // Find or create user to store the OTP (try normalized lookup to handle formatting differences)
+    let user = await this.findUserByPhone(phoneNumber);
     if (!user) {
-      user = this.userRepository.create({ phone_number: phoneNumber });
+      user = this.userRepository.create({ phone_number: phoneNumber, normalized_phone: this.normalizePhoneForStorage(phoneNumber) });
     }
     user.currentOtp = generatedOtp;
     user.otpExpiry = expiry;
@@ -54,27 +121,30 @@ export class AuthService {
     }
 
     try {
+      const targetUrl = this.buildSmsGatewayUrl();
       const payload = {
-        textMessage: {
-          text: `Your Khatabook verification code is: ${generatedOtp}. Valid for 10 minutes.`
-        },
-        phoneNumbers: [phoneNumber]
+        phoneNumbers: [this.normalizeForGateway(phoneNumber)],
+        message: `Your Khatabook verification code is: ${generatedOtp}. Valid for 10 minutes.`,
       };
 
-      const authHeader = 'Basic ' + Buffer.from(`${this.smsGatewayUser}:${this.smsGatewayPass}`).toString('base64');
-      
+      const timeoutMs = Number(this.configService.get<number>('SMS_GATEWAY_TIMEOUT_MS') || 5000);
+
+      this.logger.debug(`Sending OTP to SMS gateway URL: ${targetUrl}`);
       await firstValueFrom(
-        this.httpService.post(this.smsGatewayUrl, payload, { 
-          headers: { 
-            Authorization: authHeader,
-            'Content-Type': 'application/json'
-          } 
-        })
+        this.httpService.post(targetUrl, payload, {
+          headers: { 'Content-Type': 'application/json' },
+          timeout: timeoutMs,
+          auth: {
+            username: this.smsGatewayUser || '',
+            password: this.smsGatewayPass || '',
+          },
+        }),
       );
 
       return { success: true, message: 'OTP Sent successfully' };
     } catch (error) {
-      this.logger.error('Error requesting OTP via Android SMS Gateway', error);
+      const responseData = error?.response?.data || error?.message || 'unknown error';
+      this.logger.error('Error requesting OTP via Android SMS Gateway', responseData);
       throw new BadRequestException('Failed to send OTP');
     }
   }
@@ -84,7 +154,7 @@ export class AuthService {
       throw new BadRequestException('Phone number and OTP are required');
     }
 
-    const user = await this.userRepository.findOneBy({ phone_number: phoneNumber });
+    const user = await this.findUserByPhone(phoneNumber);
     
     if (!user || !user.currentOtp) {
        throw new UnauthorizedException('No OTP requested for this number');
@@ -98,9 +168,12 @@ export class AuthService {
        throw new UnauthorizedException('OTP has expired');
     }
 
-    // OTP matched, clear it
+    // OTP matched, clear it and increment session version
     user.currentOtp = null;
     user.otpExpiry = null;
+    user.sessionVersion = (user.sessionVersion || 1) + 1;
+    // Ensure normalized_phone is persisted using the same storage normalization logic.
+    user.normalized_phone = this.normalizePhoneForStorage(user.phone_number);
     await this.userRepository.save(user);
 
     const is_new_user = !user.name; // Simple heuristic for new user
@@ -117,10 +190,24 @@ export class AuthService {
     }
 
     // Generate JWT
-    const payload = { sub: user.id, phone: user.phone_number, businessId: business.id };
+    const payload = { 
+      sub: user.id, 
+      phone: user.phone_number, 
+      businessId: business.id, 
+      role: user.role,
+      sessionVersion: user.sessionVersion
+    };
     return {
       access_token: await this.jwtService.signAsync(payload),
       is_new_user,
     };
+  }
+
+  async logout(userId: string): Promise<{ success: boolean }> {
+    const user = await this.userRepository.findOneBy({ id: userId });
+    if (!user) return { success: true };
+    user.sessionVersion = (user.sessionVersion || 1) + 1;
+    await this.userRepository.save(user);
+    return { success: true };
   }
 }

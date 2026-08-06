@@ -391,7 +391,7 @@ fun PartiesScreen(
                     ) {
                         Icon(Icons.Default.PhotoCamera, contentDescription = null, tint = KhatabookHeaderBlue, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("AI Sheet Scan", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = KhatabookHeaderBlue)
+                        Text("Scan Khata", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = KhatabookHeaderBlue)
                     }
                 }
 
@@ -894,7 +894,7 @@ fun PartyItemRow(
                     Spacer(modifier = Modifier.width(6.dp))
 
                     Text(
-                        text = party.lastTransactionTime,
+                        text = formatRelativeTime(party.lastTransactionTime),
                         fontSize = 11.sp,
                         color = KhatabookTextMuted
                     )
@@ -922,5 +922,20 @@ fun PartyItemRow(
                 }
             }
         }
+    }
+}
+
+fun formatRelativeTime(timestamp: Long): String {
+    val diff = System.currentTimeMillis() - timestamp
+    val seconds = diff / 1000
+    val minutes = seconds / 60
+    val hours = minutes / 60
+    val days = hours / 24
+
+    return when {
+        minutes < 1 -> "Just now"
+        hours < 1 -> "$minutes ${if (minutes == 1L) "minute" else "minutes"} ago"
+        days < 1 -> "$hours ${if (hours == 1L) "hour" else "hours"} ago"
+        else -> "$days ${if (days == 1L) "day" else "days"} ago"
     }
 }

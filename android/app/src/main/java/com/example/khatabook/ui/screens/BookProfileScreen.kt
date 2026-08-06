@@ -319,32 +319,55 @@ fun BookProfileScreen(
     }
 
     if (showImagePicker) {
-        ModalBottomSheet(onDismissRequest = { showImagePicker = false }) {
-            Column(modifier = Modifier.padding(16.dp).fillMaxWidth()) {
-                Text("Select Image Source", fontWeight = FontWeight.Bold, fontSize = 18.sp,
-                    modifier = Modifier.padding(bottom = 16.dp))
-                Row(modifier = Modifier.fillMaxWidth().bounceClick {
-                    showImagePicker = false
-                    if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
-                        val photoFile = File.createTempFile(
-                            "IMG_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())}_", ".jpg", context.cacheDir
-                        )
-                        tempCameraUri = FileProvider.getUriForFile(context, "com.example.khatabook.fileprovider", photoFile)
-                        cameraLauncher.launch(tempCameraUri!!)
-                    } else permissionLauncher.launch(Manifest.permission.CAMERA)
-                }.padding(vertical = 12.dp)) {
-                    Icon(Icons.Default.CameraAlt, contentDescription = null, tint = KhatabookHeaderBlue)
-                    Spacer(Modifier.width(16.dp)); Text("Camera", fontSize = 16.sp)
+        AlertDialog(
+            onDismissRequest = { showImagePicker = false },
+            title = {
+                Text("Select Image Source", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+            },
+            text = {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                showImagePicker = false
+                                if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+                                    val photoFile = File.createTempFile(
+                                        "IMG_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())}_", ".jpg", context.cacheDir
+                                    )
+                                    tempCameraUri = FileProvider.getUriForFile(context, "com.example.khatabook.fileprovider", photoFile)
+                                    cameraLauncher.launch(tempCameraUri!!)
+                                } else permissionLauncher.launch(Manifest.permission.CAMERA)
+                            }
+                            .padding(vertical = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.CameraAlt, contentDescription = null, tint = KhatabookHeaderBlue)
+                        Spacer(Modifier.width(16.dp))
+                        Text("Camera", fontSize = 16.sp)
+                    }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                showImagePicker = false
+                                galleryLauncher.launch("image/*")
+                            }
+                            .padding(vertical = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Description, contentDescription = null, tint = KhatabookHeaderBlue)
+                        Spacer(Modifier.width(16.dp))
+                        Text("Gallery / Google Photos", fontSize = 16.sp)
+                    }
                 }
-                Row(modifier = Modifier.fillMaxWidth().bounceClick {
-                    showImagePicker = false; galleryLauncher.launch("image/*")
-                }.padding(vertical = 12.dp)) {
-                    Icon(Icons.Default.Description, contentDescription = null, tint = KhatabookHeaderBlue)
-                    Spacer(Modifier.width(16.dp)); Text("Gallery / Google Photos", fontSize = 16.sp)
+            },
+            confirmButton = {
+                TextButton(onClick = { showImagePicker = false }) {
+                    Text("Cancel", color = KhatabookTextMuted)
                 }
-                Spacer(Modifier.height(32.dp))
             }
-        }
+        )
     }
 
     // ── UI ─────────────────────────────────────────────────────────

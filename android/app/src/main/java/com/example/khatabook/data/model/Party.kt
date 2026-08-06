@@ -13,6 +13,7 @@ enum class CollectionFrequency {
     MONTHLY
 }
 
+@androidx.compose.runtime.Immutable
 data class Party(
     val id: String = UUID.randomUUID().toString(),
     val businessId: String = "biz_default",
@@ -33,6 +34,6 @@ data class Party(
     val creditLimit: Double = 5000.0,
     val tags: List<String> = emptyList(),
     val avatar: String = "",
-    val lastTransactionTime: String = "4 minutes ago",
+    val lastTransactionTime: Long = System.currentTimeMillis(),
     val createdAt: Long = System.currentTimeMillis()
 )

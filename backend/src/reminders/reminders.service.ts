@@ -19,6 +19,30 @@ export class RemindersService {
     this.smsGatewayPass = this.configService.get<string>('SMS_GATEWAY_PASSWORD') || '';
   }
 
+  private normalizeForGateway(value: string): string {
+    const digits = (value || '').replace(/\D/g, '');
+    if (!digits) return value;
+    if (digits.length === 10) return `+91${digits}`;
+    if (digits.length === 12 && digits.startsWith('91')) return `+${digits}`;
+    return value.startsWith('+') ? value : `+${digits}`;
+  }
+
+  private buildSmsGatewayUrl(): string {
+    const url = this.smsGatewayUrl.trim();
+    if (!url) return url;
+    try {
+      const parsed = new URL(url);
+      if (parsed.pathname === '' || parsed.pathname === '/') {
+        parsed.pathname = '/messages';
+      } else if (!parsed.pathname.endsWith('/messages')) {
+        parsed.pathname = parsed.pathname.replace(/\/$/, '') + '/messages';
+      }
+      return parsed.toString();
+    } catch {
+      return url.replace(/\/$/, '') + '/messages';
+    }
+  }
+
   async sendReminder(phoneNumber: string, amount: number, partyName: string): Promise<{ success: boolean, message: string }> {
     if (!phoneNumber) {
       throw new BadRequestException('Phone number is required');
@@ -32,27 +56,30 @@ export class RemindersService {
     }
 
     try {
+      const targetUrl = this.buildSmsGatewayUrl();
       const payload = {
-        textMessage: {
-          text: message
-        },
-        phoneNumbers: [phoneNumber]
+        phoneNumbers: [this.normalizeForGateway(phoneNumber)],
+        message,
       };
       
-      const authHeader = 'Basic ' + Buffer.from(`${this.smsGatewayUser}:${this.smsGatewayPass}`).toString('base64');
+      const timeoutMs = Number(this.configService.get<number>('SMS_GATEWAY_TIMEOUT_MS') || 5000);
+      this.logger.debug(`Sending reminder to SMS gateway URL: ${targetUrl}`);
 
       await firstValueFrom(
-        this.httpService.post(this.smsGatewayUrl, payload, { 
-          headers: { 
-            Authorization: authHeader,
-            'Content-Type': 'application/json'
-          } 
-        })
+        this.httpService.post(targetUrl, payload, {
+          headers: { 'Content-Type': 'application/json' },
+          timeout: timeoutMs,
+          auth: {
+            username: this.smsGatewayUser || '',
+            password: this.smsGatewayPass || '',
+          },
+        }),
       );
       
       return { success: true, message: 'Reminder Sent successfully' };
     } catch (error) {
-      this.logger.error('Error sending Reminder via Android SMS Gateway', error);
+      const responseData = error?.response?.data || error?.message || 'unknown error';
+      this.logger.error('Error sending Reminder via Android SMS Gateway', responseData);
       throw new BadRequestException('Failed to send Reminder');
     }
   }

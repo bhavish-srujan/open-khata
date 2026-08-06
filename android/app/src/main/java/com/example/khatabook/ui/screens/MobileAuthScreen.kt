@@ -9,6 +9,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Phone
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -20,16 +21,12 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.khatabook.data.api.NetworkClient
-import com.example.khatabook.data.api.OtpRequest
 import com.example.khatabook.ui.theme.*
 import kotlinx.coroutines.launch
 import android.app.Activity
 import androidx.compose.ui.platform.LocalContext
-import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.auth.PhoneAuthOptions
-import com.google.firebase.auth.PhoneAuthProvider
-import com.google.firebase.FirebaseException
-import java.util.concurrent.TimeUnit
+import com.example.khatabook.data.repository.KhatabookRepository
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -43,6 +40,8 @@ fun MobileAuthScreen(
     var isLoading by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
+    val repository = remember { KhatabookRepository(context) }
+    var showSettingsDialog by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -51,6 +50,11 @@ fun MobileAuthScreen(
                 navigationIcon = {
                     BounceIconButton(onClick = onBackClick) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
+                    }
+                },
+                actions = {
+                    BounceIconButton(onClick = { showSettingsDialog = true }) {
+                        Icon(Icons.Default.Settings, contentDescription = "Settings", tint = Color.White)
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = KhatabookHeaderBlue)
@@ -149,32 +153,23 @@ fun MobileAuthScreen(
             BounceButton(
                 onClick = {
                     if (phoneNumber.length == 10) {
-                        val fullPhone = "+91$phoneNumber"
                         isLoading = true
-                        errorMessage = null
-                        
-                        val activity = context as Activity
-                        val options = PhoneAuthOptions.newBuilder(FirebaseAuth.getInstance())
-                            .setPhoneNumber(fullPhone)
-                            .setTimeout(60L, TimeUnit.SECONDS)
-                            .setActivity(activity)
-                            .setCallbacks(object : PhoneAuthProvider.OnVerificationStateChangedCallbacks() {
-                                override fun onVerificationCompleted(credential: com.google.firebase.auth.PhoneAuthCredential) {
-                                    // Handled in next screen if auto-resolved
+                        val fullPhone = "+91$phoneNumber"
+                        coroutineScope.launch {
+                            try {
+                                val request = com.example.khatabook.data.api.RequestOtpRequest(fullPhone)
+                                val response = NetworkClient.apiService.requestOtp(request)
+                                if (response.isSuccessful && response.body()?.success == true) {
+                                    onSendOtp(fullPhone, "dummy_verification_id")
+                                } else {
+                                    errorMessage = response.errorBody()?.string() ?: "Failed to send OTP"
                                 }
-                                override fun onVerificationFailed(e: FirebaseException) {
-                                    isLoading = false
-                                    errorMessage = e.message ?: "Verification failed"
-                                }
-                                override fun onCodeSent(
-                                    verificationId: String,
-                                    token: PhoneAuthProvider.ForceResendingToken
-                                ) {
-                                    isLoading = false
-                                    onSendOtp(fullPhone, verificationId)
-                                }
-                            }).build()
-                        PhoneAuthProvider.verifyPhoneNumber(options)
+                            } catch (e: Exception) {
+                                errorMessage = "Network error: ${e.message}"
+                            } finally {
+                                isLoading = false
+                            }
+                        }
                     } else {
                         errorMessage = "Please enter a valid 10-digit mobile number"
                     }
@@ -213,6 +208,42 @@ fun MobileAuthScreen(
                 color = KhatabookTextMuted,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.padding(bottom = 12.dp)
+            )
+        }
+        
+        if (showSettingsDialog) {
+            var newUrl by remember { mutableStateOf(repository.getServerUrl()) }
+            AlertDialog(
+                onDismissRequest = { showSettingsDialog = false },
+                title = { Text("Developer Settings", fontWeight = FontWeight.Bold) },
+                text = {
+                    Column {
+                        Text("Change Server API URL", fontSize = 14.sp, color = KhatabookTextDark)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = newUrl,
+                            onValueChange = { newUrl = it },
+                            placeholder = { Text("http://10.0.2.2:3000/") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text("Use emulator: http://10.0.2.2:3000/. For a real device, use a reachable URL such as a local network IP (http://192.168.x.x:3000/) or your Render deployment URL (https://your-backend.onrender.com/).", fontSize = 12.sp, color = KhatabookTextMuted)
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        repository.setServerUrl(newUrl)
+                        showSettingsDialog = false
+                    }) {
+                        Text("SAVE", color = KhatabookHeaderBlue, fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showSettingsDialog = false }) {
+                        Text("CANCEL", color = KhatabookTextMuted)
+                    }
+                }
             )
         }
     }

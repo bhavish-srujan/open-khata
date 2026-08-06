@@ -39,7 +39,18 @@ class KhatabookRepository(private val context: Context) {
     private var activePhoneNumber: String = ""
 
     init {
+        val savedUrl = getServerUrl()
+        NetworkClient.updateBaseUrl(savedUrl)
         loadData()
+    }
+
+    fun getServerUrl(): String {
+        return prefs.getString("custom_server_url", "http://10.0.2.2:3000/") ?: "http://10.0.2.2:3000/"
+    }
+
+    fun setServerUrl(url: String) {
+        prefs.edit().putString("custom_server_url", url).apply()
+        NetworkClient.updateBaseUrl(url)
     }
 
     // ─── Remote Sync ───────────────────────────────────────────────
@@ -112,7 +123,7 @@ class KhatabookRepository(private val context: Context) {
         
         val partiesJson = prefs.getString("parties_data_$activePhoneNumber", null)
         if (partiesJson != null) {
-            val type = object : TypeToken<List<Party>>() {}.type
+            val type = TypeToken.getParameterized(List::class.java, Party::class.java).type
             val savedParties: List<Party> = gson.fromJson(partiesJson, type)
             _parties.value = savedParties
         } else {
@@ -121,7 +132,7 @@ class KhatabookRepository(private val context: Context) {
 
         val entriesJson = prefs.getString("entries_data_$activePhoneNumber", null)
         if (entriesJson != null) {
-            val type = object : TypeToken<List<LedgerEntry>>() {}.type
+            val type = TypeToken.getParameterized(List::class.java, LedgerEntry::class.java).type
             val savedEntries: List<LedgerEntry> = gson.fromJson(entriesJson, type)
             _ledgerEntries.value = savedEntries
         } else {
@@ -170,6 +181,18 @@ class KhatabookRepository(private val context: Context) {
                 )
             } catch (_: Exception) { /* offline — will sync on next launch */ }
         }
+        // Trigger SMS Intent for new customer
+        try {
+            val message = "Hi $name, welcome to Khatabook! Your profile has been created."
+            val smsIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("sms:$phone")).apply {
+                putExtra("sms_body", message)
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(smsIntent)
+        } catch (e: Exception) {
+            // Ignore
+        }
+        
         return newParty
     }
 
@@ -182,30 +205,14 @@ class KhatabookRepository(private val context: Context) {
                 it.name.equals(customerCodeOrName, ignoreCase = true) ||
                 it.name.contains(customerCodeOrName, ignoreCase = true)
             )
-        }
-
-        val partyToUse = if (existingParty != null) {
-            existingParty
-        } else {
-            val newParty = Party(
-                businessId = businessId,
-                name = customerCodeOrName,
-                phone = "+91 98000 ${10000 + (1000..9999).random()}",
-                type = PartyType.CUSTOMER,
-                collectionFrequency = CollectionFrequency.DAILY,
-                currentBalance = 0.0
-            )
-            _parties.value = _parties.value + newParty
-            saveData()
-            newParty
-        }
+        } ?: return // Skip unknown customers from sheet scan
 
         // 2. Add GOT entry (money collected) and update running balance
         addLedgerEntry(
-            partyId = partyToUse.id,
+            partyId = existingParty.id,
             amount = amountCollected,
             type = TransactionType.GOT,
-            note = "AI Sheet Scan Collection: $date",
+            note = "Scan Khata Collection: $date",
             source = EntrySource.OCR
         )
     }
@@ -238,7 +245,10 @@ class KhatabookRepository(private val context: Context) {
                 } else {
                     if (type == TransactionType.GAVE) -amount else amount
                 }
-                party.copy(currentBalance = party.currentBalance + delta)
+                party.copy(
+                    currentBalance = party.currentBalance + delta,
+                    lastTransactionTime = System.currentTimeMillis()
+                )
             } else {
                 party
             }
@@ -261,6 +271,26 @@ class KhatabookRepository(private val context: Context) {
                 )
             } catch (_: Exception) { /* offline */ }
         }
+        // Trigger SMS Intent for transaction
+        try {
+            val updatedParty = _parties.value.find { it.id == partyId }
+            if (updatedParty != null && source != EntrySource.OCR) {
+                val sign = if (updatedParty.type == PartyType.CUSTOMER) {
+                    if (type == TransactionType.GAVE) "-" else "+"
+                } else {
+                    if (type == TransactionType.GAVE) "+" else "-"
+                }
+                val message = "Hi, Entry added for Rs $sign${amount.toInt()} on ${java.text.SimpleDateFormat("dd MMM", java.util.Locale.getDefault()).format(java.util.Date())}. Total dues : Rs ${updatedParty.currentBalance.toInt()}. Check history: https://khatabook.com/t/${(1000..9999).random()} Thank you My Business"
+                val smsIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("sms:${updatedParty.phone}")).apply {
+                    putExtra("sms_body", message)
+                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(smsIntent)
+            }
+        } catch (e: Exception) {
+            // Ignore
+        }
+        
         return newEntry
     }
 
@@ -307,6 +337,13 @@ class KhatabookRepository(private val context: Context) {
             } else {
                 entry
             }
+        }
+        saveData()
+    }
+
+    fun updateParty(updatedParty: Party) {
+        _parties.value = _parties.value.map { party ->
+            if (party.id == updatedParty.id) updatedParty else party
         }
         saveData()
     }

@@ -1,13 +1,22 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { RemindersController } from './reminders.controller';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { RemindersService } from './reminders.service';
 
 describe('RemindersController', () => {
   let controller: RemindersController;
 
   beforeEach(async () => {
-    const module: TestingModule = await Test.createTestingModule({
+    const builder = Test.createTestingModule({
       controllers: [RemindersController],
-    }).compile();
+      providers: [
+        { provide: RemindersService, useValue: {} },
+      ],
+    });
+
+    const module: TestingModule = await builder
+      .overrideGuard(JwtAuthGuard).useValue({ canActivate: () => true })
+      .compile();
 
     controller = module.get<RemindersController>(RemindersController);
   });

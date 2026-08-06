@@ -1,5 +1,6 @@
-import { Controller, Post, Body, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Post, Body, HttpCode, HttpStatus, UseGuards, Request } from '@nestjs/common';
 import { AuthService } from './auth.service';
+import { JwtAuthGuard } from './jwt-auth.guard';
 
 @Controller('auth')
 export class AuthController {
@@ -15,5 +16,13 @@ export class AuthController {
   @Post('verify-otp')
   verifyOtp(@Body() body: { phoneNumber: string, otp: string }) {
     return this.authService.verifyOtp(body.phoneNumber, body.otp);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  @Post('logout')
+  logout(@Request() req) {
+    const userId = req.user?.sub;
+    return this.authService.logout(userId);
   }
 }

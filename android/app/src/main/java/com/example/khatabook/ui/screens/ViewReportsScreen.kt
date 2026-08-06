@@ -21,7 +21,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.LocalContext
 import com.example.khatabook.ui.theme.*
+import com.example.khatabook.utils.PdfGenerator
+import com.example.khatabook.data.model.Party
+import com.example.khatabook.data.model.PartyType
+import com.example.khatabook.data.model.LedgerEntry
 
 data class ReportItem(
     val title: String,
@@ -35,6 +40,7 @@ fun ViewReportsScreen(
     onBackClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     var selectedTimePeriod by remember { mutableStateOf("This Month") }
     var selectedCategory by remember { mutableStateOf("All") }
     val categories = listOf("All", "Customer", "Bills", "GST", "Day-wise", "Inventory", "Supplier")
@@ -69,7 +75,11 @@ fun ViewReportsScreen(
             ) {
                 Box(modifier = Modifier.padding(14.dp)) {
                     BounceButton(
-                        onClick = {},
+                        onClick = {
+                            val dummyParty = Party(id = "dummy", name = "My Business", phone = "", type = PartyType.CUSTOMER)
+                            val dummyEntries = emptyList<LedgerEntry>()
+                            PdfGenerator.generateAndShareLedgerReport(context, dummyParty, dummyEntries)
+                        },
                         colors = ButtonDefaults.buttonColors(containerColor = KhatabookHeaderBlue),
                         shape = RoundedCornerShape(8.dp),
                         modifier = Modifier.fillMaxWidth().height(46.dp)

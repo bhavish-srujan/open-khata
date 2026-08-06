@@ -3,12 +3,14 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Party } from './party.entity';
 import { CreatePartyDto } from './dto/create-party.dto';
+import { SmsService } from '../notifications/sms/sms.service';
 
 @Injectable()
 export class PartyService {
   constructor(
     @InjectRepository(Party)
     private readonly partyRepository: Repository<Party>,
+    private readonly smsService: SmsService,
   ) {}
 
   findAll(businessId: string, type?: 'CUSTOMER' | 'SUPPLIER'): Promise<Party[]> {
@@ -34,7 +36,17 @@ export class PartyService {
       businessId,
       currentBalance: 0,
     });
-    return this.partyRepository.save(party);
+    const savedParty = await this.partyRepository.save(party);
+
+    // Send welcome SMS if phone number is provided
+    if (savedParty.phone) {
+      await this.smsService.sendSms(
+        savedParty.phone,
+        `Welcome to Khata Book! Your account has been created by ${businessId}.`,
+      );
+    }
+
+    return savedParty;
   }
 
   async delete(id: string, businessId: string): Promise<void> {

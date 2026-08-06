@@ -18,6 +18,7 @@ enum class EntryStatus {
     REJECTED
 }
 
+@androidx.compose.runtime.Immutable
 data class LedgerEntry(
     val id: String = UUID.randomUUID().toString(),
     val businessId: String = "biz_default",

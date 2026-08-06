@@ -5,6 +5,7 @@ import { LedgerEntry } from './ledger-entry.entity';
 import { Party } from '../party/party.entity';
 import { CreateLedgerEntryDto } from './dto/create-ledger-entry.dto';
 import { BalanceHistory } from './balance-history.entity';
+import { SmsService } from '../notifications/sms/sms.service';
 
 @Injectable()
 export class LedgerService {
@@ -14,6 +15,7 @@ export class LedgerService {
     @InjectRepository(Party)
     private readonly partyRepository: Repository<Party>,
     private dataSource: DataSource,
+    private smsService: SmsService,
   ) {}
 
   findByParty(partyId: string, businessId: string): Promise<LedgerEntry[]> {
@@ -76,6 +78,15 @@ export class LedgerService {
         newBalance,
       });
       await manager.save(history);
+
+      // 6. Send SMS Notification
+      if (party.phone) {
+        const actionText = dto.type === 'GAVE' ? 'gave you' : 'received from you';
+        const message = `Khata Book: Transaction recorded. ${businessId} ${actionText} ₹${dto.amount}. Current Balance: ₹${Math.abs(newBalance)}.`;
+        
+        // Fire and forget (don't block the transaction)
+        this.smsService.sendSms(party.phone, message).catch(console.error);
+      }
 
       return savedEntry;
     });

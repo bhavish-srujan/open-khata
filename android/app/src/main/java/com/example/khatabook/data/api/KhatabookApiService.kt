@@ -2,12 +2,33 @@ package com.example.khatabook.data.api
 
 import retrofit2.Response
 import retrofit2.http.*
+import androidx.annotation.Keep
 
 // ─── Auth DTOs ───────────────────────────────────────────────
-data class VerifyTokenRequest(val idToken: String)
-data class VerifyTokenResponse(val access_token: String, val is_new_user: Boolean)
+@Keep
+data class RequestOtpRequest(val phoneNumber: String)
+@Keep
+data class RequestOtpResponse(val success: Boolean, val message: String)
+
+@Keep
+data class VerifyOtpRequest(val phoneNumber: String, val otp: String)
+@Keep
+data class VerifyOtpResponse(val access_token: String, val is_new_user: Boolean)
+
+// ─── Reminders DTOs ─────────────────────────────────────────
+@Keep
+data class SendReminderRequest(val phoneNumber: String, val amount: Double, val partyName: String)
+@Keep
+data class SendReminderResponse(val success: Boolean, val message: String)
+
+// ─── Scanning DTOs ──────────────────────────────────────────
+@Keep
+data class ExtractedEntry(val customerName: String, val amount: Double)
+@Keep
+data class ExtractLedgerResponse(val date: String, val totalCollected: Double, val records: List<ExtractedEntry>)
 
 // ─── Party DTOs ──────────────────────────────────────────────
+@Keep
 data class PartyResponse(
     val id: String,
     val name: String,
@@ -19,6 +40,7 @@ data class PartyResponse(
     val createdAt: String
 )
 
+@Keep
 data class CreatePartyRequest(
     val name: String,
     val phone: String,
@@ -28,6 +50,7 @@ data class CreatePartyRequest(
 )
 
 // ─── Ledger DTOs ─────────────────────────────────────────────
+@Keep
 data class LedgerEntryResponse(
     val id: String,
     val partyId: String,
@@ -39,6 +62,7 @@ data class LedgerEntryResponse(
     val createdAt: String
 )
 
+@Keep
 data class CreateLedgerEntryRequest(
     val partyId: String,
     val amount: Double,
@@ -49,11 +73,24 @@ data class CreateLedgerEntryRequest(
 )
 
 // ─── API Interface ────────────────────────────────────────────
+@Keep
 interface KhatabookApiService {
 
     // Auth
-    @POST("auth/verify-token")
-    suspend fun verifyToken(@Body body: VerifyTokenRequest): Response<VerifyTokenResponse>
+    @POST("auth/request-otp")
+    suspend fun requestOtp(@Body body: RequestOtpRequest): Response<RequestOtpResponse>
+
+    @POST("auth/verify-otp")
+    suspend fun verifyOtp(@Body body: VerifyOtpRequest): Response<VerifyOtpResponse>
+
+    // Reminders
+    @POST("api/v1/reminders/send")
+    suspend fun sendReminder(@Body body: SendReminderRequest): Response<SendReminderResponse>
+
+    // Scanning
+    @Multipart
+    @POST("api/v1/scanning/extract")
+    suspend fun extractLedger(@Part image: okhttp3.MultipartBody.Part): Response<ExtractLedgerResponse>
 
     // Parties
     @GET("api/v1/parties")
@@ -66,12 +103,12 @@ interface KhatabookApiService {
     suspend fun deleteParty(@Path("id") id: String): Response<Unit>
 
     // Ledger
-    @GET("api/v1/ledger/entries")
-    suspend fun getLedgerEntries(@Query("partyId") partyId: String): Response<List<LedgerEntryResponse>>
+    @GET("api/v1/ledger/party/{partyId}")
+    suspend fun getLedgerEntries(@Path("partyId") partyId: String): Response<List<LedgerEntryResponse>>
 
-    @POST("api/v1/ledger/entries")
+    @POST("api/v1/ledger")
     suspend fun createLedgerEntry(@Body body: CreateLedgerEntryRequest): Response<LedgerEntryResponse>
 
-    @DELETE("api/v1/ledger/entries/{id}")
+    @DELETE("api/v1/ledger/{id}")
     suspend fun deleteLedgerEntry(@Path("id") id: String): Response<Unit>
 }

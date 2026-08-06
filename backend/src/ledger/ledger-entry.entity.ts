@@ -14,6 +14,9 @@ export class LedgerEntry {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
+  @Column({ nullable: true })
+  receiptUrl: string;
+
   @Column({ name: 'business_id' })
   businessId: string;
 

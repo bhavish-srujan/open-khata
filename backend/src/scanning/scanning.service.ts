@@ -1,4 +1,4 @@
-import { Injectable, Logger, BadRequestException, InternalServerErrorException } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, InternalServerErrorException, GatewayTimeoutException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GoogleGenAI } from '@google/genai';
 
@@ -24,10 +24,11 @@ export class ScanningService {
     if (!this.ai) {
       // Return mock data if API key is not configured
       return {
-        partyName: 'Rahul Traders',
-        entries: [
-          { date: '2023-10-25', amount: 500, type: 'GAVE', notes: 'Rice and Dal' },
-          { date: '2023-10-26', amount: 200, type: 'GOT', notes: 'Cash paid' }
+        date: '2023-10-25',
+        totalCollected: 700.0,
+        records: [
+          { customerName: 'Rahul Traders', amount: 500.0 },
+          { customerName: 'Pndi', amount: 200.0 }
         ]
       };
     }
@@ -35,20 +36,24 @@ export class ScanningService {
     try {
       const prompt = `
       You are an expert at extracting accounting data from handwritten ledger (khata) images.
-      Extract the party name (customer/supplier) and all ledger entries (credits/debits).
-      For each entry, extract the date, amount, type (either 'GAVE' if credit was given or 'GOT' if payment was received), and any notes/particulars.
+      The user is uploading a "Daily Collection Sheet" where multiple customers pay money on a single day.
+      Extract the total collected amount and the list of individual records.
+      For each record, extract the customer's name (or code) and the amount they paid/received.
       Return the data strictly as a JSON object with this format:
       {
-        "partyName": "Name of the party",
-        "entries": [
-          { "date": "YYYY-MM-DD", "amount": 100.50, "type": "GAVE" | "GOT", "notes": "Item description" }
+        "date": "YYYY-MM-DD",
+        "totalCollected": 5000.0,
+        "records": [
+          { "customerName": "Name of customer", "amount": 500.0 }
         ]
       }
+      If the exact date is not visible, use today's date or leave it blank.
       Do not include any markdown formatting or text outside the JSON object.
       `;
 
-      const response = await this.ai.models.generateContent({
-        model: 'gemini-2.5-flash',
+      // Run AI call with an enforced timeout to avoid long buffering for clients
+      const aiCall = this.ai.models.generateContent({
+        model: 'gemini-flash-latest',
         contents: [
           {
             role: 'user',
@@ -64,7 +69,11 @@ export class ScanningService {
         }
       });
 
-      const text = response.text;
+      const timeoutMs = Number(this.configService.get<number>('AI_TIMEOUT_MS') || 15000);
+      const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('AI timeout')), timeoutMs));
+      const response: any = await Promise.race([aiCall, timeout]);
+
+      const text = response?.text;
       if (!text) {
         throw new Error('No response from Gemini');
       }
@@ -73,7 +82,10 @@ export class ScanningService {
       return parsedData;
 
     } catch (error) {
-      this.logger.error('Failed to extract data using Gemini', error);
+      this.logger.error('Failed to extract data using Gemini', error?.message || error);
+      if (error?.message === 'AI timeout') {
+        throw new GatewayTimeoutException('AI request timed out. Try again later.');
+      }
       throw new InternalServerErrorException('Failed to process image');
     }
   }

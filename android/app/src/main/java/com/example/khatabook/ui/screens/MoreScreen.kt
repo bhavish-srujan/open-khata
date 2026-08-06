@@ -68,6 +68,8 @@ fun MoreScreen(
     onHelpSupportClick: () -> Unit = {},
     onAboutUsClick: () -> Unit = {},
     businessName: String = "My Business",
+    userName: String = "User",
+    phoneNumber: String = "",
     selectedLanguageName: String = "English",
     modifier: Modifier = Modifier
 ) {
@@ -211,13 +213,13 @@ fun MoreScreen(
 
                             Column {
                                 Text(
-                                    text = businessName.ifBlank { "My Business" },
+                                    text = if (businessName.isNotBlank()) businessName else userName.ifBlank { "My Business" },
                                     fontSize = 16.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = KhatabookTextDark
                                 )
                                 Text(
-                                    text = "+91 98765 43210 • Edit Profile",
+                                    text = "${phoneNumber.ifBlank { "Not authenticated" }} • Edit Profile",
                                     fontSize = 11.sp,
                                     color = KhatabookHeaderBlue,
                                     fontWeight = FontWeight.SemiBold

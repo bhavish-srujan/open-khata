@@ -24,7 +24,6 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.layout.onGloballyPositioned
 import com.example.khatabook.data.api.NetworkClient
-import com.example.khatabook.data.api.VerifyRequest
 import com.example.khatabook.ui.theme.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -35,10 +34,7 @@ import android.content.IntentFilter
 import android.os.Build
 import android.telephony.SmsMessage
 import androidx.compose.ui.platform.LocalContext
-import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.auth.PhoneAuthProvider
-import com.example.khatabook.data.api.VerifyTokenRequest
-import kotlinx.coroutines.tasks.await
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -85,37 +81,33 @@ fun OtpVerificationScreen(
                                     SmsMessage.createFromPdu(pdu as ByteArray)
                                 }
                                 val messageBody = sms.messageBody
-                                if (messageBody != null && messageBody.contains("OTP for") && messageBody.contains("is:")) {
-                                    // Extract 6-digit OTP using Regex
-                                    val regex = Regex("is: (\\d{6})")
+                                if (messageBody != null) {
+                                    // Extract 6-digit OTP using Regex (Firebase typically sends '123456 is your verification code')
+                                    val regex = Regex("(?<!\\d)(\\d{6})(?!\\d)")
                                     val matchResult = regex.find(messageBody)
                                     val otp = matchResult?.groupValues?.get(1)
                                     if (otp != null) {
                                         otpCode = otp
                                         // Auto-submit logic
-                                        if (!isLoading) {
                                             isLoading = true
                                             coroutineScope.launch {
                                                 try {
-                                                    val credential = PhoneAuthProvider.getCredential(verificationId, otpCode)
-                                                    val authResult = FirebaseAuth.getInstance().signInWithCredential(credential).await()
-                                                    val tokenResult = authResult.user?.getIdToken(false)?.await()
-                                                    val idToken = tokenResult?.token ?: throw Exception("Token missing")
-                                                    
-                                                    val response = NetworkClient.apiService.verifyToken(VerifyTokenRequest(idToken))
+                                                    val request = com.example.khatabook.data.api.VerifyOtpRequest(phoneNumber, otpCode)
+                                                    val response = NetworkClient.apiService.verifyOtp(request)
                                                     if (response.isSuccessful && response.body() != null) {
-                                                        val body = response.body()!!
-                                                        onVerifySuccess(body.access_token, body.is_new_user)
+                                                        val token = response.body()!!.access_token
+                                                        val isNewUser = response.body()!!.is_new_user
+                                                        onVerifySuccess(token, isNewUser)
                                                     } else {
-                                                        errorMessage = "Invalid OTP"
+                                                        errorMessage = response.errorBody()?.string() ?: "Invalid OTP"
+                                                        otpCode = ""
                                                     }
                                                 } catch (e: Exception) {
-                                                    errorMessage = "Invalid OTP"
+                                                    errorMessage = "Network error: ${e.message}"
                                                 } finally {
                                                     isLoading = false
                                                 }
                                             }
-                                        }
                                     }
                                 }
                             }
@@ -267,14 +259,30 @@ fun OtpVerificationScreen(
                         fontWeight = FontWeight.Bold,
                         color = KhatabookHeaderBlue,
                         modifier = Modifier.clickable {
-                            timerSeconds = 30
-                            canResend = false
-                            otpCode = ""
-                            errorMessage = null
-                                // Cannot easily resend via Firebase without Activity context here, 
-                                // so usually you let them go back and request again, or pass context here.
-                                // For simplicity, we just clear and tell them to go back.
-                                errorMessage = "Please go back to request a new OTP"
+                            if (!isLoading) {
+                                timerSeconds = 30
+                                canResend = false
+                                otpCode = ""
+                                errorMessage = null
+                                isLoading = true
+                                coroutineScope.launch {
+                                    try {
+                                        val request = com.example.khatabook.data.api.RequestOtpRequest(phoneNumber)
+                                        val response = NetworkClient.apiService.requestOtp(request)
+                                        if (!response.isSuccessful || response.body()?.success != true) {
+                                            errorMessage = response.errorBody()?.string() ?: "Failed to resend OTP"
+                                            timerSeconds = 0
+                                            canResend = true
+                                        }
+                                    } catch (e: Exception) {
+                                        errorMessage = "Network error: ${e.message}"
+                                        timerSeconds = 0
+                                        canResend = true
+                                    } finally {
+                                        isLoading = false
+                                    }
+                                }
+                            }
                         }
                     )
                 }
@@ -289,23 +297,18 @@ fun OtpVerificationScreen(
                         errorMessage = null
                         coroutineScope.launch {
                             try {
-                                val credential = PhoneAuthProvider.getCredential(verificationId, otpCode)
-                                val authResult = FirebaseAuth.getInstance().signInWithCredential(credential).await()
-                                val tokenResult = authResult.user?.getIdToken(false)?.await()
-                                val idToken = tokenResult?.token ?: throw Exception("Token missing")
-                                
-                                val response = NetworkClient.apiService.verifyToken(
-                                    VerifyTokenRequest(idToken = idToken)
-                                )
+                                val request = com.example.khatabook.data.api.VerifyOtpRequest(phoneNumber, otpCode)
+                                val response = NetworkClient.apiService.verifyOtp(request)
                                 if (response.isSuccessful && response.body() != null) {
-                                    val body = response.body()!!
-                                    onVerifySuccess(body.access_token, body.is_new_user)
+                                    val token = response.body()!!.access_token
+                                    val isNewUser = response.body()!!.is_new_user
+                                    onVerifySuccess(token, isNewUser)
                                 } else {
-                                    errorMessage = "Invalid OTP. Please check and try again."
+                                    errorMessage = response.errorBody()?.string() ?: "Invalid OTP"
                                     otpCode = ""
                                 }
                             } catch (e: Exception) {
-                                errorMessage = "Cannot reach server or invalid OTP."
+                                errorMessage = "Network error: ${e.message}"
                             } finally {
                                 isLoading = false
                             }
