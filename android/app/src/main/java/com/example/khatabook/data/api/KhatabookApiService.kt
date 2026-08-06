@@ -81,6 +81,52 @@ data class CreateLedgerEntryRequest(
     val source: String = "MANUAL"
 )
 
+// ─── Reports DTOs ────────────────────────────────────────────
+@Keep
+data class CashflowResponse(
+    val totalIn: Double,   // money received  (GOT entries)
+    val totalOut: Double,  // credit extended (GAVE entries)
+    val net: Double
+)
+
+// ─── Bills DTOs ──────────────────────────────────────────────
+@Keep
+data class BillResponse(
+    val id: String,
+    val partyId: String,
+    val totalAmount: Double,
+    val isGst: Boolean,
+    val receiptUrl: String?,
+    val created_at: String
+)
+
+// ─── Inventory DTOs ──────────────────────────────────────────
+@Keep
+data class InventoryItemResponse(
+    val id: String,
+    val name: String,
+    val sku: String?,
+    val sellingPrice: Double,
+    val purchasePrice: Double,
+    val currentStock: Double,
+    val lowStockThreshold: Double
+)
+
+// ─── Cashbook feed DTOs ──────────────────────────────────────
+/** A business-wide ledger row, with the party joined for display. */
+@Keep
+data class LedgerFeedEntry(
+    val id: String,
+    val partyId: String,
+    val amount: Double,
+    val type: String,        // "GAVE" or "GOT"
+    val note: String?,
+    val paymentMethod: String,
+    val source: String,
+    val createdAt: String,
+    val party: PartyResponse? = null
+)
+
 // ─── API Interface ────────────────────────────────────────────
 @Keep
 interface KhatabookApiService {
@@ -120,4 +166,30 @@ interface KhatabookApiService {
 
     @DELETE("api/v1/ledger/{id}")
     suspend fun deleteLedgerEntry(@Path("id") id: String): Response<Unit>
+
+    /**
+     * Business-wide ledger feed for the cashbook. Null bounds are omitted from
+     * the query string rather than sent empty, which the server would reject as
+     * a non-ISO date.
+     */
+    @GET("api/v1/ledger")
+    suspend fun getBusinessLedger(
+        @Query("from") from: String? = null,
+        @Query("to") to: String? = null
+    ): Response<List<LedgerFeedEntry>>
+
+    // Reports
+    @GET("reports/cashflow")
+    suspend fun getCashflow(
+        @Query("startDate") startDate: String? = null,
+        @Query("endDate") endDate: String? = null
+    ): Response<CashflowResponse>
+
+    // Bills
+    @GET("bills")
+    suspend fun getBills(): Response<List<BillResponse>>
+
+    // Inventory
+    @GET("inventory")
+    suspend fun getInventoryItems(): Response<List<InventoryItemResponse>>
 }

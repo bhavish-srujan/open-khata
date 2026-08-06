@@ -186,6 +186,57 @@ describe('LedgerService — idempotent create', () => {
     expect(entries).toHaveLength(1);
   });
 
+  describe('findByBusiness (cashbook feed)', () => {
+    let findArgs: any;
+
+    beforeEach(() => {
+      const repo = (service as any).ledgerRepository;
+      repo.find = jest.fn(async (args: any) => ((findArgs = args), []));
+    });
+
+    it('scopes to the business, newest first, with the party joined', async () => {
+      await service.findByBusiness(BUSINESS_A);
+
+      expect(findArgs.where.businessId).toBe(BUSINESS_A);
+      expect(findArgs.order).toEqual({ createdAt: 'DESC' });
+      expect(findArgs.relations).toEqual({ party: true });
+    });
+
+    it('caps the row count so one call cannot pull a whole ledger', async () => {
+      await service.findByBusiness(BUSINESS_A);
+
+      expect(findArgs.take).toBe(500);
+    });
+
+    it('applies no date filter when neither bound is given', async () => {
+      await service.findByBusiness(BUSINESS_A);
+
+      expect(findArgs.where.createdAt).toBeUndefined();
+    });
+
+    it('filters between both bounds', async () => {
+      await service.findByBusiness(BUSINESS_A, {
+        from: '2026-01-01T00:00:00.000Z',
+        to: '2026-02-01T00:00:00.000Z',
+      });
+
+      // Between(from, to) keeps both endpoints in its value array.
+      expect(findArgs.where.createdAt.value).toEqual([
+        new Date('2026-01-01T00:00:00.000Z'),
+        new Date('2026-02-01T00:00:00.000Z'),
+      ]);
+    });
+
+    it.each([
+      ['from only', { from: '2026-01-01T00:00:00.000Z' }, 'moreThanOrEqual'],
+      ['to only', { to: '2026-02-01T00:00:00.000Z' }, 'lessThanOrEqual'],
+    ])('handles %s', async (_label, range, expectedType) => {
+      await service.findByBusiness(BUSINESS_A, range);
+
+      expect(findArgs.where.createdAt.type).toBe(expectedType);
+    });
+  });
+
   it('distinct ids still accumulate normally', async () => {
     await service.create(BUSINESS_A, { ...dto, id: CLIENT_ID });
     await service.create(BUSINESS_A, {

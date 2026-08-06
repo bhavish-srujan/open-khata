@@ -12,7 +12,7 @@ import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Receipt
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -20,6 +20,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.khatabook.data.api.BillResponse
+import com.example.khatabook.data.api.NetworkClient
 import com.example.khatabook.ui.components.BounceExtendedFloatingActionButton
 import com.example.khatabook.ui.components.BounceIconButton
 import com.example.khatabook.ui.components.bounceClick
@@ -27,12 +29,51 @@ import com.example.khatabook.ui.theme.*
 
 data class Bill(val id: String, val customerName: String, val date: String, val amount: Double, val status: String)
 
+/**
+ * Maps a server bill onto the row model.
+ *
+ * `GET /bills` does not join the party, so the customer name is not available
+ * here; the bill's own reference is shown instead of inventing one. Status is
+ * derived from the GST flag, the only status-like field the entity carries.
+ */
+private fun BillResponse.toUiBill(): Bill = Bill(
+    id = id,
+    customerName = "Bill #${id.take(8)}",
+    date = created_at.take(10),
+    amount = totalAmount,
+    status = if (isGst) "GST" else "Non-GST"
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BillsScreen(
     onBackClick: () -> Unit
 ) {
-    val sampleBills = emptyList<Bill>()
+    var bills by remember { mutableStateOf<List<Bill>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(true) }
+    var loadError by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(Unit) {
+        isLoading = true
+        loadError = null
+        try {
+            val response = NetworkClient.apiService.getBills()
+            val body = response.body()
+            if (response.isSuccessful && body != null) {
+                bills = body.map { it.toUiBill() }
+            } else {
+                loadError = when (response.code()) {
+                    401 -> "Session expired. Please log in again."
+                    403 -> "You do not have permission to view bills."
+                    else -> "Could not load bills (HTTP ${response.code()})."
+                }
+            }
+        } catch (e: Exception) {
+            loadError = "Could not reach the server. Check your connection."
+        } finally {
+            isLoading = false
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -78,9 +119,42 @@ fun BillsScreen(
                     Text("Recent Bills", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = KhatabookTextMuted)
                     Spacer(modifier = Modifier.height(8.dp))
                 }
-                items(sampleBills.size) { index ->
-                    val bill = sampleBills[index]
-                    BillItemCard(bill = bill)
+
+                when {
+                    isLoading -> item {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(24.dp),
+                                strokeWidth = 2.dp,
+                                color = KhatabookHeaderBlue
+                            )
+                        }
+                    }
+
+                    loadError != null -> item {
+                        Text(
+                            text = loadError!!,
+                            fontSize = 13.sp,
+                            color = KhatabookGiveRed,
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp)
+                        )
+                    }
+
+                    bills.isEmpty() -> item {
+                        Text(
+                            text = "No bills yet. Create one to get started.",
+                            fontSize = 13.sp,
+                            color = KhatabookTextMuted,
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp)
+                        )
+                    }
+
+                    else -> items(bills.size) { index ->
+                        BillItemCard(bill = bills[index])
+                    }
                 }
             }
         }

@@ -11,7 +11,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.Inventory
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -19,18 +19,53 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.khatabook.data.api.InventoryItemResponse
+import com.example.khatabook.data.api.NetworkClient
 import com.example.khatabook.ui.components.BounceExtendedFloatingActionButton
 import com.example.khatabook.ui.components.BounceIconButton
 import com.example.khatabook.ui.theme.*
 
 data class InventoryItem(val id: String, val name: String, val stock: Int, val price: Double)
 
+/** Maps a server item onto the row model. Stock is decimal server-side (it can
+ *  hold weights), but this list shows whole units. */
+private fun InventoryItemResponse.toUiItem(): InventoryItem = InventoryItem(
+    id = id,
+    name = name,
+    stock = currentStock.toInt(),
+    price = sellingPrice
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ItemsScreen(
     onBackClick: () -> Unit
 ) {
-    val sampleItems = emptyList<InventoryItem>()
+    var items by remember { mutableStateOf<List<InventoryItem>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(true) }
+    var loadError by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(Unit) {
+        isLoading = true
+        loadError = null
+        try {
+            val response = NetworkClient.apiService.getInventoryItems()
+            val body = response.body()
+            if (response.isSuccessful && body != null) {
+                items = body.map { it.toUiItem() }
+            } else {
+                loadError = when (response.code()) {
+                    401 -> "Session expired. Please log in again."
+                    403 -> "You do not have permission to view inventory."
+                    else -> "Could not load items (HTTP ${response.code()})."
+                }
+            }
+        } catch (e: Exception) {
+            loadError = "Could not reach the server. Check your connection."
+        } finally {
+            isLoading = false
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -76,9 +111,41 @@ fun ItemsScreen(
                     Text("Your Items", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = KhatabookTextMuted)
                     Spacer(modifier = Modifier.height(8.dp))
                 }
-                items(sampleItems.size) { index ->
-                    val item = sampleItems[index]
-                    InventoryItemCard(item = item)
+                when {
+                    isLoading -> item {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(24.dp),
+                                strokeWidth = 2.dp,
+                                color = KhatabookHeaderBlue
+                            )
+                        }
+                    }
+
+                    loadError != null -> item {
+                        Text(
+                            text = loadError!!,
+                            fontSize = 13.sp,
+                            color = KhatabookGiveRed,
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp)
+                        )
+                    }
+
+                    items.isEmpty() -> item {
+                        Text(
+                            text = "No items yet. Add one to start tracking stock.",
+                            fontSize = 13.sp,
+                            color = KhatabookTextMuted,
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp)
+                        )
+                    }
+
+                    else -> items(items.size) { index ->
+                        InventoryItemCard(item = items[index])
+                    }
                 }
             }
         }

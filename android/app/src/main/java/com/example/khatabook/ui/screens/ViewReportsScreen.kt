@@ -22,6 +22,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalContext
+import com.example.khatabook.data.api.NetworkClient
 import com.example.khatabook.ui.theme.*
 import com.example.khatabook.utils.PdfGenerator
 import com.example.khatabook.data.model.Party
@@ -34,6 +35,32 @@ data class ReportItem(
     val icon: String = "📄"
 )
 
+/**
+ * ISO-8601 UTC start bound for a time period label.
+ *
+ * Uses Calendar rather than java.time because minSdk is 24 and core library
+ * desugaring is not enabled.
+ */
+private fun startDateFor(period: String): String {
+    val calendar = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC"))
+    when (period) {
+        "This Month" -> calendar.set(java.util.Calendar.DAY_OF_MONTH, 1)
+        "This Year" -> calendar.set(java.util.Calendar.DAY_OF_YEAR, 1)
+        // "All Time": an epoch-ish floor. The server defaults to the last month
+        // when startDate is omitted, so an explicit early bound is required.
+        else -> calendar.timeInMillis = 0L
+    }
+    if (period != "All Time") {
+        calendar.set(java.util.Calendar.HOUR_OF_DAY, 0)
+        calendar.set(java.util.Calendar.MINUTE, 0)
+        calendar.set(java.util.Calendar.SECOND, 0)
+        calendar.set(java.util.Calendar.MILLISECOND, 0)
+    }
+    val format = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US)
+    format.timeZone = java.util.TimeZone.getTimeZone("UTC")
+    return format.format(calendar.time)
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ViewReportsScreen(
@@ -45,10 +72,38 @@ fun ViewReportsScreen(
     var selectedCategory by remember { mutableStateOf("All") }
     val categories = listOf("All", "Customer", "Bills", "GST", "Day-wise", "Inventory", "Supplier")
 
-    val (collected, creditGiven, netCashflow) = when (selectedTimePeriod) {
-        "This Month" -> Triple(12500.0, 4800.0, 7700.0)
-        "This Year" -> Triple(145000.0, 38000.0, 107000.0)
-        else -> Triple(320000.0, 85000.0, 235000.0)
+    // Real cashflow for the selected period. Refetches whenever the period
+    // changes; previously these were three hardcoded Triples.
+    var collected by remember { mutableStateOf(0.0) }
+    var creditGiven by remember { mutableStateOf(0.0) }
+    var netCashflow by remember { mutableStateOf(0.0) }
+    var isLoadingCashflow by remember { mutableStateOf(true) }
+    var cashflowError by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(selectedTimePeriod) {
+        isLoadingCashflow = true
+        cashflowError = null
+        try {
+            val response = NetworkClient.apiService.getCashflow(
+                startDate = startDateFor(selectedTimePeriod)
+            )
+            val body = response.body()
+            if (response.isSuccessful && body != null) {
+                collected = body.totalIn
+                creditGiven = body.totalOut
+                netCashflow = body.net
+            } else {
+                cashflowError = when (response.code()) {
+                    401 -> "Session expired. Please log in again."
+                    403 -> "You do not have permission to view reports."
+                    else -> "Could not load reports (HTTP ${response.code()})."
+                }
+            }
+        } catch (e: Exception) {
+            cashflowError = "Could not reach the server. Check your connection."
+        } finally {
+            isLoadingCashflow = false
+        }
     }
 
     Scaffold(
@@ -134,6 +189,26 @@ fun ViewReportsScreen(
 
                     Spacer(modifier = Modifier.height(12.dp))
 
+                    if (isLoadingCashflow) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                strokeWidth = 2.dp,
+                                color = KhatabookHeaderBlue
+                            )
+                        }
+                    } else if (cashflowError != null) {
+                        Text(
+                            text = cashflowError!!,
+                            fontSize = 12.sp,
+                            color = KhatabookGiveRed,
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)
+                        )
+                    } else {
+
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -160,6 +235,8 @@ fun ViewReportsScreen(
                             Text("₹ ${netCashflow.toInt()}", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = KhatabookHeaderBlue)
                         }
                     }
+
+                    } // end cashflow loaded branch
                 }
             }
 

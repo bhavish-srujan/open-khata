@@ -28,6 +28,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.khatabook.data.api.LedgerFeedEntry
+import com.example.khatabook.data.api.NetworkClient
 import com.example.khatabook.ui.components.ItemPopIn
 import com.example.khatabook.ui.components.bounceClick
 import com.example.khatabook.ui.theme.*
@@ -38,6 +40,23 @@ data class LocalCashbookEntry(
     val isCashIn: Boolean,
     val note: String,
     val time: String
+)
+
+/**
+ * Maps a ledger row onto a cashbook line.
+ *
+ * GOT means money came in, GAVE means credit went out — the same convention
+ * LedgerService uses to sign balances. The note falls back to the party name so
+ * a row is never blank.
+ */
+private fun LedgerFeedEntry.toCashbookEntry(): LocalCashbookEntry = LocalCashbookEntry(
+    id = id,
+    amount = amount,
+    isCashIn = type == "GOT",
+    note = note?.takeIf { it.isNotBlank() }
+        ?: party?.name
+        ?: if (type == "GOT") "Payment received" else "Credit given",
+    time = createdAt.take(10)
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -51,12 +70,31 @@ fun CashbookScreen(
     var showAddCashInDialog by remember { mutableStateOf(false) }
     var showAddCashOutDialog by remember { mutableStateOf(false) }
 
-    val entries = remember {
-        mutableStateListOf(
-            LocalCashbookEntry("1", 500.0, true, "Counter Cash Sales", "Today, 10:30 AM"),
-            LocalCashbookEntry("2", 150.0, false, "Tea & Snacks Expense", "Today, 11:15 AM"),
-            LocalCashbookEntry("3", 1200.0, true, "Customer Payment Received", "Yesterday, 04:45 PM")
-        )
+    // Real business-wide ledger feed. These were three fabricated rows before.
+    val entries = remember { mutableStateListOf<LocalCashbookEntry>() }
+    var isLoading by remember { mutableStateOf(true) }
+    var loadError by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(Unit) {
+        isLoading = true
+        loadError = null
+        try {
+            val response = NetworkClient.apiService.getBusinessLedger()
+            val body = response.body()
+            if (response.isSuccessful && body != null) {
+                entries.clear()
+                entries.addAll(body.map { it.toCashbookEntry() })
+            } else {
+                loadError = when (response.code()) {
+                    401 -> "Session expired. Please log in again."
+                    else -> "Could not load the cashbook (HTTP ${response.code()})."
+                }
+            }
+        } catch (e: Exception) {
+            loadError = "Could not reach the server. Check your connection."
+        } finally {
+            isLoading = false
+        }
     }
 
     val totalCashIn = remember(entries) { entries.filter { it.isCashIn }.sumOf { it.amount } }
@@ -171,12 +209,24 @@ fun CashbookScreen(
             Text("Daily Cash Entries", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = KhatabookTextDark)
             Spacer(modifier = Modifier.height(8.dp))
 
-            if (entries.isEmpty()) {
+            if (isLoading) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(28.dp),
+                        strokeWidth = 2.dp,
+                        color = KhatabookHeaderBlue
+                    )
+                }
+            } else if (loadError != null) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(loadError!!, fontSize = 13.sp, color = KhatabookGiveRed)
+                }
+            } else if (entries.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(Icons.Default.ReceiptLong, contentDescription = null, tint = KhatabookTextMuted, modifier = Modifier.size(48.dp))
                         Spacer(modifier = Modifier.height(8.dp))
-                        Text("No cash entries added today", fontSize = 13.sp, color = KhatabookTextMuted)
+                        Text("No cash entries yet", fontSize = 13.sp, color = KhatabookTextMuted)
                     }
                 }
             } else {

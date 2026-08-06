@@ -5,6 +5,7 @@ import {
   Delete,
   Body,
   Param,
+  Query,
   HttpCode,
   HttpStatus,
   UseGuards,
@@ -14,6 +15,7 @@ import {
 } from '@nestjs/common';
 import { LedgerService } from './ledger.service';
 import { CreateLedgerEntryDto } from './dto/create-ledger-entry.dto';
+import { ListLedgerQueryDto } from './dto/list-ledger-query.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
 @UseGuards(JwtAuthGuard)
@@ -32,6 +34,19 @@ export class LedgerController {
       throw new BadRequestException('Token does not carry a businessId');
     }
     return businessId as string;
+  }
+
+  /** Business-wide feed backing the cashbook. Declared before the more specific
+   * 'party/:partyId' route for readability; Nest matches on the literal path so
+   * ordering is not load-bearing here. */
+  @Get()
+  getLedgerForBusiness(
+    @Req() req,
+    @Headers() headers,
+    @Query() query: ListLedgerQueryDto,
+  ) {
+    const businessId = this.extractBusinessId(req, headers);
+    return this.ledgerService.findByBusiness(businessId, query);
   }
 
   @Get('party/:partyId')

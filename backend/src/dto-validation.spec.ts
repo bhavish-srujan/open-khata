@@ -28,6 +28,8 @@ describe('POST body validation (parties + ledger)', () => {
   const seenBusinessIds: string[] = [];
   /** Claim the stubbed guard puts on req.user; undefined means "token has none". */
   let tokenBusinessId: string | undefined = BUSINESS_ID;
+  /** Date ranges the cashbook feed received. */
+  const listedRanges: any[] = [];
 
   beforeAll(async () => {
     const moduleRef: TestingModule = await Test.createTestingModule({
@@ -54,6 +56,11 @@ describe('POST body validation (parties + ledger)', () => {
               seenBusinessIds.push(businessId);
               created.push(dto);
               return Promise.resolve({ id: 'entry-1', businessId, ...dto });
+            }),
+            findByBusiness: jest.fn((businessId, range) => {
+              seenBusinessIds.push(businessId);
+              listedRanges.push(range);
+              return Promise.resolve([]);
             }),
           },
         },
@@ -86,7 +93,51 @@ describe('POST body validation (parties + ledger)', () => {
   beforeEach(() => {
     created.length = 0;
     seenBusinessIds.length = 0;
+    listedRanges.length = 0;
     tokenBusinessId = BUSINESS_ID;
+  });
+
+  // Query params pass through the same whitelist + forbidNonWhitelisted pipe as
+  // bodies, so an undecorated query DTO would reject every request.
+  describe('GET /api/v1/ledger (cashbook feed)', () => {
+    it('accepts a bare request', async () => {
+      await request(app.getHttpServer()).get('/api/v1/ledger').expect(200);
+
+      expect(seenBusinessIds).toEqual([BUSINESS_ID]);
+    });
+
+    it('accepts an ISO date range', async () => {
+      await request(app.getHttpServer())
+        .get('/api/v1/ledger')
+        .query({ from: '2026-01-01T00:00:00.000Z', to: '2026-02-01T00:00:00.000Z' })
+        .expect(200);
+
+      expect(listedRanges[0]).toEqual({
+        from: '2026-01-01T00:00:00.000Z',
+        to: '2026-02-01T00:00:00.000Z',
+      });
+    });
+
+    it.each([
+      ['from', { from: 'last-tuesday' }],
+      ['to', { to: '31/12/2026' }],
+    ])('rejects a non-ISO %s', async (field, query) => {
+      const res = await request(app.getHttpServer())
+        .get('/api/v1/ledger')
+        .query(query);
+
+      expect(res.status).toBe(400);
+      expect(JSON.stringify(res.body.message)).toContain(field);
+    });
+
+    it('rejects unknown query params', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/v1/ledger')
+        .query({ businessId: 'someone-elses' });
+
+      expect(res.status).toBe(400);
+      expect(JSON.stringify(res.body.message)).toContain('businessId');
+    });
   });
 
   // The controllers used to accept `req.user.businessId || headers['x-business-id']`,

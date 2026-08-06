@@ -5,12 +5,21 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource } from 'typeorm';
+import {
+  Repository,
+  DataSource,
+  Between,
+  MoreThanOrEqual,
+  LessThanOrEqual,
+} from 'typeorm';
 import { LedgerEntry } from './ledger-entry.entity';
 import { Party } from '../party/party.entity';
 import { CreateLedgerEntryDto } from './dto/create-ledger-entry.dto';
 import { BalanceHistory } from './balance-history.entity';
 import { SmsService } from '../notifications/sms/sms.service';
+
+/** Upper bound on the business-wide feed, so one call cannot pull a whole ledger. */
+const MAX_LEDGER_FEED_ROWS = 500;
 
 @Injectable()
 export class LedgerService {
@@ -27,6 +36,32 @@ export class LedgerService {
     return this.ledgerRepository.find({
       where: { partyId, businessId },
       order: { createdAt: 'DESC' },
+    });
+  }
+
+  /**
+   * Business-wide feed, newest first, for the cashbook. Capped rather than
+   * paginated: the client renders a recent-activity list, and an unbounded
+   * find() on a busy business would be a denial of service against ourselves.
+   */
+  findByBusiness(
+    businessId: string,
+    range: { from?: string; to?: string } = {},
+  ): Promise<LedgerEntry[]> {
+    const where: any = { businessId };
+
+    const from = range.from ? new Date(range.from) : undefined;
+    const to = range.to ? new Date(range.to) : undefined;
+
+    if (from && to) where.createdAt = Between(from, to);
+    else if (from) where.createdAt = MoreThanOrEqual(from);
+    else if (to) where.createdAt = LessThanOrEqual(to);
+
+    return this.ledgerRepository.find({
+      where,
+      order: { createdAt: 'DESC' },
+      take: MAX_LEDGER_FEED_ROWS,
+      relations: { party: true },
     });
   }
 
