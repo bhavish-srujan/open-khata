@@ -59,6 +59,32 @@ import com.example.khatabook.ui.screens.ViewReportsScreen
 import com.example.khatabook.ui.screens.availableLanguages
 import kotlinx.coroutines.launch
 
+/**
+ * Removes every trace of the signed-out account's credentials.
+ *
+ * All of these matter: `jwt_token_<phone>` is what AuthInterceptor reads,
+ * `jwt_token` is a legacy global copy that would otherwise be picked up as a
+ * fallback, and `auth_phone` is what selects the active account on next launch.
+ * Other signed-in accounts in [loggedInPhones] are left intact.
+ */
+internal fun clearSession(
+    prefs: android.content.SharedPreferences,
+    phone: String,
+    loggedInPhones: MutableList<String>
+) {
+    val editor = prefs.edit()
+    if (phone.isNotBlank()) {
+        editor.remove("jwt_token_$phone")
+    }
+    editor.remove("jwt_token")
+    editor.remove("auth_phone")
+
+    loggedInPhones.remove(phone)
+    editor.putString("logged_in_phones_list", loggedInPhones.joinToString(","))
+
+    editor.apply()
+}
+
 enum class AppScreen {
     LANGUAGE_SELECTION,
     PERMISSIONS,
@@ -561,6 +587,7 @@ class MainActivity : AppCompatActivity() {
                                 }
 
                                 AppScreen.SETTINGS -> {
+                                    val settingsScope = rememberCoroutineScope()
                                     SettingsScreen(
                                         onBackClick = { navigateBack() },
                                         onSmsSettingsClick = { navigateTo(AppScreen.SMS_SETTINGS) },
@@ -570,8 +597,21 @@ class MainActivity : AppCompatActivity() {
                                         onDeleteKhataClick = { navigateTo(AppScreen.DELETE_KHATA) },
                                         onChangeLanguageClick = { navigateTo(AppScreen.LANGUAGE_SELECTION) },
                                         onLogoutClick = {
-                                            updateLoginState(false)
-                                            this@MainActivity.finish()
+                                            // Logout previously only flipped a local flag: the JWT
+                                            // stayed in encrypted prefs and stayed valid server-side
+                                            // for its full 7 days, so a "logged out" phone was still
+                                            // a working credential.
+                                            settingsScope.launch {
+                                                // Revoke first, while the token is still present for
+                                                // the interceptor to send. Best effort — if offline,
+                                                // the local credential is cleared regardless.
+                                                runCatching { NetworkClient.apiService.logout() }
+
+                                                clearSession(prefs, authenticatedPhone, loggedInPhones)
+                                                authenticatedPhone = ""
+                                                updateLoginState(false)
+                                                this@MainActivity.finish()
+                                            }
                                         },
                                         isAppLockEnabled = isAppLockEnabled,
                                         onToggleAppLock = { enabled, pin ->

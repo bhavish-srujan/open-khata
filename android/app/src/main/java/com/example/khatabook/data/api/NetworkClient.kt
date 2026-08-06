@@ -1,5 +1,6 @@
 package com.example.khatabook.data.api
 
+import com.example.khatabook.BuildConfig
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
@@ -21,8 +22,19 @@ object NetworkClient {
         NetworkClient.tokenProvider = tokenProvider
     }
 
+    /**
+     * Full request/response bodies are logged only in debug builds.
+     *
+     * Level.BODY was previously unconditional, so release builds wrote every
+     * Authorization header and every OTP verification payload to logcat, where
+     * a bug report or any log-reading process could pick them up.
+     */
     private val loggingInterceptor = HttpLoggingInterceptor().apply {
-        level = HttpLoggingInterceptor.Level.BODY
+        level = if (BuildConfig.DEBUG) {
+            HttpLoggingInterceptor.Level.BODY
+        } else {
+            HttpLoggingInterceptor.Level.NONE
+        }
     }
 
     // OkHttpClient is built lazily; `tokenProvider` is captured by reference

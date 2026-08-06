@@ -138,6 +138,14 @@ interface KhatabookApiService {
     @POST("auth/verify-otp")
     suspend fun verifyOtp(@Body body: VerifyOtpRequest): Response<VerifyOtpResponse>
 
+    /**
+     * Revokes the current session server-side by bumping sessionVersion, which
+     * invalidates this JWT immediately rather than leaving it usable for the
+     * remainder of its 7-day life.
+     */
+    @POST("auth/logout")
+    suspend fun logout(): Response<Unit>
+
     // Reminders
     @POST("api/v1/reminders/send")
     suspend fun sendReminder(@Body body: SendReminderRequest): Response<SendReminderResponse>

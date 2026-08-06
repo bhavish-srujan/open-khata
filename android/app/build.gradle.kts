@@ -34,6 +34,9 @@ android {
     }
     buildFeatures {
       compose = true
+      // Needed for BuildConfig.DEBUG, which gates HTTP body logging so bearer
+      // tokens and OTP codes are never written to logcat in a release build.
+      buildConfig = true
     }
 
     packaging {
