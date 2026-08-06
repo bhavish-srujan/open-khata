@@ -17,8 +17,8 @@ export class AddNormalizedPhoneToUsers1691240000000 implements MigrationInterfac
     }
 
     public async down(queryRunner: QueryRunner): Promise<void> {
-        await queryRunner.query(`DROP INDEX "UQ_users_normalized_phone"`);
-        await queryRunner.query(`ALTER TABLE "users" DROP COLUMN "normalized_phone"`);
+        await queryRunner.query(`DROP INDEX IF EXISTS "UQ_users_normalized_phone"`);
+        await queryRunner.query(`ALTER TABLE "users" DROP COLUMN IF EXISTS "normalized_phone"`);
     }
 
 }
