@@ -8,6 +8,7 @@ import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from '../users/user.entity';
+import { setAuditUser } from '../audit-logs/audit-context';
 
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
@@ -35,6 +36,8 @@ export class JwtAuthGuard implements CanActivate {
       }
 
       request['user'] = payload;
+      // Attribution for AuditLogSubscriber, which has no access to the request.
+      setAuditUser(payload.sub);
       return true;
     } catch (error) {
       if (error instanceof UnauthorizedException) {

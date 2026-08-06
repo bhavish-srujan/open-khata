@@ -3,10 +3,15 @@ import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { join } from 'path';
+import { auditContextMiddleware } from './audit-logs/audit-context';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
-  
+
+  // Must be first: opens the AsyncLocalStorage scope that JwtAuthGuard writes
+  // the acting user into and AuditLogSubscriber later reads.
+  app.use(auditContextMiddleware);
+
   app.enableCors();
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true }));
   
