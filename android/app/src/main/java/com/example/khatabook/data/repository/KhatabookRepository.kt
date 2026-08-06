@@ -176,8 +176,7 @@ class KhatabookRepository(private val context: Context) {
                         id = newParty.id,
                         name = name,
                         phone = phone,
-                        type = type.name,
-                        businessId = businessId
+                        type = type.name
                     )
                 )
             } catch (_: Exception) { /* offline — will sync on next launch */ }

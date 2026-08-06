@@ -21,10 +21,15 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 export class LedgerController {
   constructor(private readonly ledgerService: LedgerService) {}
 
-  private extractBusinessId(req: any, headers: Record<string, string>): string {
-    const businessId = req.user?.businessId || headers['x-business-id'];
+  /**
+   * The business comes from the verified JWT only. It used to fall back to an
+   * x-business-id header, which would have let a caller name any business they
+   * liked had a token ever lacked the claim.
+   */
+  private extractBusinessId(req: any, _headers: Record<string, string>): string {
+    const businessId = req.user?.businessId;
     if (!businessId) {
-      throw new BadRequestException('businessId is required in token or x-business-id header');
+      throw new BadRequestException('Token does not carry a businessId');
     }
     return businessId as string;
   }

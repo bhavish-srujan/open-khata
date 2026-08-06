@@ -24,6 +24,10 @@ describe('POST body validation (parties + ledger)', () => {
   // Captures what the controller actually forwarded, so we can assert that
   // whitelisting did not silently drop fields the service depends on.
   const created: any[] = [];
+  // The businessId each controller resolved, to prove it comes from the token.
+  const seenBusinessIds: string[] = [];
+  /** Claim the stubbed guard puts on req.user; undefined means "token has none". */
+  let tokenBusinessId: string | undefined = BUSINESS_ID;
 
   beforeAll(async () => {
     const moduleRef: TestingModule = await Test.createTestingModule({
@@ -33,8 +37,13 @@ describe('POST body validation (parties + ledger)', () => {
           provide: PartyService,
           useValue: {
             create: jest.fn((businessId, dto) => {
+              seenBusinessIds.push(businessId);
               created.push(dto);
               return Promise.resolve({ id: PARTY_ID, businessId, ...dto });
+            }),
+            findAll: jest.fn((businessId) => {
+              seenBusinessIds.push(businessId);
+              return Promise.resolve([]);
             }),
           },
         },
@@ -42,6 +51,7 @@ describe('POST body validation (parties + ledger)', () => {
           provide: LedgerService,
           useValue: {
             create: jest.fn((businessId, dto) => {
+              seenBusinessIds.push(businessId);
               created.push(dto);
               return Promise.resolve({ id: 'entry-1', businessId, ...dto });
             }),
@@ -49,11 +59,13 @@ describe('POST body validation (parties + ledger)', () => {
         },
       ],
     })
-      // Bypass auth; inject the business id the controllers read off req.user.
+      // Bypass auth; inject whatever claim the current test wants on req.user.
       .overrideGuard(JwtAuthGuard)
       .useValue({
         canActivate: (ctx: any) => {
-          ctx.switchToHttp().getRequest().user = { businessId: BUSINESS_ID };
+          ctx.switchToHttp().getRequest().user = tokenBusinessId
+            ? { businessId: tokenBusinessId }
+            : {};
           return true;
         },
       })
@@ -73,6 +85,70 @@ describe('POST body validation (parties + ledger)', () => {
 
   beforeEach(() => {
     created.length = 0;
+    seenBusinessIds.length = 0;
+    tokenBusinessId = BUSINESS_ID;
+  });
+
+  // The controllers used to accept `req.user.businessId || headers['x-business-id']`,
+  // so a caller could name any business they liked if a token ever lacked the claim.
+  describe('business scoping comes from the token, not a header', () => {
+    const HOSTILE = '00000000-0000-4000-8000-0000deadbeef';
+
+    it('ignores x-business-id on party create', async () => {
+      await request(app.getHttpServer())
+        .post('/api/v1/parties')
+        .set('x-business-id', HOSTILE)
+        .send({ name: 'Rahul Traders', phone: '+919876543210', type: 'CUSTOMER' })
+        .expect(201);
+
+      expect(seenBusinessIds).toEqual([BUSINESS_ID]);
+    });
+
+    it('ignores x-business-id on ledger create', async () => {
+      await request(app.getHttpServer())
+        .post('/api/v1/ledger')
+        .set('x-business-id', HOSTILE)
+        .send({ partyId: PARTY_ID, amount: 100, type: 'GAVE' })
+        .expect(201);
+
+      expect(seenBusinessIds).toEqual([BUSINESS_ID]);
+    });
+
+    // The decisive case. While the header fallback existed, a token with no
+    // businessId claim would silently adopt whatever the caller sent, letting
+    // them write into a business of their choosing. It must now be refused.
+    describe('when the token carries no businessId', () => {
+      beforeEach(() => {
+        tokenBusinessId = undefined;
+      });
+
+      it('refuses party create rather than trusting the header', async () => {
+        await request(app.getHttpServer())
+          .post('/api/v1/parties')
+          .set('x-business-id', HOSTILE)
+          .send({ name: 'Rahul Traders', phone: '+919876543210', type: 'CUSTOMER' })
+          .expect(400);
+
+        expect(seenBusinessIds).toEqual([]);
+      });
+
+      it('refuses ledger create rather than trusting the header', async () => {
+        await request(app.getHttpServer())
+          .post('/api/v1/ledger')
+          .set('x-business-id', HOSTILE)
+          .send({ partyId: PARTY_ID, amount: 100, type: 'GAVE' })
+          .expect(400);
+
+        expect(seenBusinessIds).toEqual([]);
+      });
+
+      it('refuses reads too', async () => {
+        await request(app.getHttpServer())
+          .get('/api/v1/parties')
+          .set('x-business-id', HOSTILE)
+          .expect(400);
+      });
+    });
   });
 
   describe('POST /api/v1/parties', () => {

@@ -51,8 +51,9 @@ data class CreatePartyRequest(
     val name: String,
     val phone: String,
     val type: String,
-    val gstin: String? = null,
-    val businessId: String = "biz_1"
+    val gstin: String? = null
+    // No businessId: the server derives the real business from the JWT. The old
+    // hardcoded "biz_1" was never a real id and was ignored server-side.
 )
 
 // ─── Ledger DTOs ─────────────────────────────────────────────
