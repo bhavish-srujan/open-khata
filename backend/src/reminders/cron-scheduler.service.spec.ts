@@ -1,3 +1,4 @@
+import { ConfigService } from '@nestjs/config';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Test, TestingModule } from '@nestjs/testing';
 import { CronSchedulerService } from './cron-scheduler.service';
@@ -28,6 +29,8 @@ const CLAUSE_PREDICATES: Record<
   (party: any, params: Record<string, any>) => boolean
 > = {
   'party.type = :type': (p, params) => p.type === params.type,
+  'party.currentBalance >= :minBalance': (p, params) =>
+    Number(p.currentBalance) >= params.minBalance,
   'party.currentBalance > 0': (p) => Number(p.currentBalance) > 0,
   'party.currentBalance < 0': (p) => Number(p.currentBalance) < 0,
 };
@@ -36,6 +39,7 @@ describe('CronSchedulerService — reminder targeting', () => {
   let service: CronSchedulerService;
   let sendReminder: jest.Mock;
   let population: any[];
+  let env: Record<string, string>;
 
   /** Postgres returns numeric(14,2) as a string; mirror that. */
   const party = (name: string, type: string, balance: string, phone = `+9198765432${name.length}0`) =>
@@ -50,6 +54,8 @@ describe('CronSchedulerService — reminder targeting', () => {
   beforeEach(async () => {
     population = [OWES_US, WE_OWE_THEM, SETTLED, SUPPLIER_WE_OWE, SUPPLIER_IN_CREDIT];
     sendReminder = jest.fn().mockResolvedValue({ success: true, message: 'ok' });
+    // Targeting tests run with the job switched on; the kill switch has its own block.
+    env = { REMINDERS_ENABLED: 'true' };
 
     const makeQueryBuilder = () => {
       const clauses: { sql: string; params: Record<string, any> }[] = [];
@@ -78,6 +84,7 @@ describe('CronSchedulerService — reminder targeting', () => {
           provide: getRepositoryToken(Party),
           useValue: { createQueryBuilder: makeQueryBuilder },
         },
+        { provide: ConfigService, useValue: { get: (key: string) => env[key] } },
       ],
     }).compile();
 
@@ -133,6 +140,73 @@ describe('CronSchedulerService — reminder targeting', () => {
     await service.handleDailyReminders();
 
     expect(sendReminder).not.toHaveBeenCalled();
+  });
+
+  describe('kill switch', () => {
+    it('sends nothing when REMINDERS_ENABLED is unset', async () => {
+      env = {};
+
+      await service.handleDailyReminders();
+
+      expect(sendReminder).not.toHaveBeenCalled();
+    });
+
+    it.each(['false', 'FALSE', '0', 'yes', 'no', ''])(
+      'stays off for REMINDERS_ENABLED=%p',
+      async (value) => {
+        env = { REMINDERS_ENABLED: value };
+
+        await service.handleDailyReminders();
+
+        expect(sendReminder).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each(['true', 'TRUE', ' true '])(
+      'runs for REMINDERS_ENABLED=%p',
+      async (value) => {
+        env = { REMINDERS_ENABLED: value };
+
+        await service.handleDailyReminders();
+
+        expect(sendReminder).toHaveBeenCalledTimes(1);
+      },
+    );
+  });
+
+  describe('minimum balance', () => {
+    it('ignores rounding dust below the default threshold', async () => {
+      population = [party('Dust Co', 'CUSTOMER', '0.40')];
+
+      await service.handleDailyReminders();
+
+      expect(sendReminder).not.toHaveBeenCalled();
+    });
+
+    it('honours an explicit REMINDER_MIN_BALANCE', async () => {
+      env = { REMINDERS_ENABLED: 'true', REMINDER_MIN_BALANCE: '1000' };
+      population = [
+        party('Small Debt', 'CUSTOMER', '500.00'),
+        party('Big Debt', 'CUSTOMER', '1500.00'),
+      ];
+
+      await service.handleDailyReminders();
+
+      expect(remindedNames()).toEqual(['Big Debt']);
+    });
+
+    it.each(['0', '-5', 'abc', ''])(
+      'falls back to the default for a nonsensical threshold %p',
+      async (value) => {
+        env = { REMINDERS_ENABLED: 'true', REMINDER_MIN_BALANCE: value };
+        // A settled party must never match, whatever the configured threshold.
+        population = [party('Settled Co', 'CUSTOMER', '0.00')];
+
+        await service.handleDailyReminders();
+
+        expect(sendReminder).not.toHaveBeenCalled();
+      },
+    );
   });
 
   it('keeps going when one reminder fails', async () => {
