@@ -1,5 +1,6 @@
 import { Controller, Post, Get, Put, Delete, Body, Param, UseGuards, Request } from '@nestjs/common';
 import { BusinessService } from './business.service';
+import { CreateBusinessDto, UpdateBusinessDto } from './dto/business.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
 @UseGuards(JwtAuthGuard)
@@ -8,7 +9,7 @@ export class BusinessController {
   constructor(private readonly businessService: BusinessService) {}
 
   @Post()
-  create(@Request() req, @Body() body: { name: string; type?: string; gstNumber?: string }) {
+  create(@Request() req, @Body() body: CreateBusinessDto) {
     return this.businessService.create(req.user.sub, body.name, body.type, body.gstNumber);
   }
 
@@ -23,7 +24,7 @@ export class BusinessController {
   }
 
   @Put(':id')
-  update(@Request() req, @Param('id') id: string, @Body() body: any) {
+  update(@Request() req, @Param('id') id: string, @Body() body: UpdateBusinessDto) {
     return this.businessService.update(id, req.user.sub, body);
   }
 

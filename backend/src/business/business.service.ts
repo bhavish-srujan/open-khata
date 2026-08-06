@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Business } from './business.entity';
+import { UpdateBusinessDto } from './dto/business.dto';
 
 @Injectable()
 export class BusinessService {
@@ -32,9 +33,25 @@ export class BusinessService {
     return business;
   }
 
-  async update(id: string, ownerId: string, updateData: Partial<Business>): Promise<Business> {
+  /**
+   * Applies only the editable fields.
+   *
+   * Deliberately not Object.assign: that copied whatever the request carried,
+   * so `{"ownerId": "..."}` reassigned the business to another user and
+   * `{"id": "..."}` repointed the row. Ownership and identity are set at
+   * creation and are not editable.
+   */
+  async update(
+    id: string,
+    ownerId: string,
+    updateData: UpdateBusinessDto,
+  ): Promise<Business> {
     const business = await this.findOne(id, ownerId);
-    Object.assign(business, updateData);
+
+    if (updateData.name !== undefined) business.name = updateData.name;
+    if (updateData.type !== undefined) business.type = updateData.type;
+    if (updateData.gstNumber !== undefined) business.gstNumber = updateData.gstNumber;
+
     return this.businessRepository.save(business);
   }
 

@@ -1,6 +1,6 @@
 import { Controller, Get, Post, Body, Param, Put, Delete, UseGuards, Request } from '@nestjs/common';
 import { InventoryService } from './inventory.service';
-import { Item } from './item.entity';
+import { CreateItemDto, UpdateItemDto } from './dto/item.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
@@ -35,14 +35,14 @@ export class InventoryController {
 
   @Post()
   @Roles(UserRole.OWNER, UserRole.MANAGER)
-  create(@Body() itemData: Partial<Item>, @Request() req) {
+  create(@Body() itemData: CreateItemDto, @Request() req) {
     const businessId = req.user.businessId;
     return this.inventoryService.create(itemData, businessId);
   }
 
   @Put(':id')
   @Roles(UserRole.OWNER, UserRole.MANAGER)
-  update(@Param('id') id: string, @Body() itemData: Partial<Item>, @Request() req) {
+  update(@Param('id') id: string, @Body() itemData: UpdateItemDto, @Request() req) {
     const businessId = req.user.businessId;
     return this.inventoryService.update(id, itemData, businessId);
   }
