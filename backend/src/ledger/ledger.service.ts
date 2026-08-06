@@ -64,7 +64,7 @@ export class LedgerService {
         type: dto.type,
         note: dto.note ?? '',
         paymentMethod: dto.paymentMethod ?? 'Cash',
-        source: (dto as any).source ?? 'MANUAL',
+        source: dto.source ?? 'MANUAL',
         status: 'CONFIRMED',
       });
       const savedEntry = await manager.save(entry);
