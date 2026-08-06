@@ -2,14 +2,14 @@ import 'reflect-metadata';
 import * as fs from 'fs';
 import * as path from 'path';
 import { getMetadataArgsStorage } from 'typeorm';
-import { User } from '../users/user.entity';
-import { Party } from '../party/party.entity';
-import { LedgerEntry } from '../ledger/ledger-entry.entity';
-import { Business } from '../business/business.entity';
-import { BalanceHistory } from '../ledger/balance-history.entity';
-import { Item } from '../inventory/item.entity';
-import { AuditLog } from '../audit-logs/audit-log.entity';
-import { Bill } from '../bills/entities/bill.entity';
+import { User } from './users/user.entity';
+import { Party } from './party/party.entity';
+import { LedgerEntry } from './ledger/ledger-entry.entity';
+import { Business } from './business/business.entity';
+import { BalanceHistory } from './ledger/balance-history.entity';
+import { Item } from './inventory/item.entity';
+import { AuditLog } from './audit-logs/audit-log.entity';
+import { Bill } from './bills/entities/bill.entity';
 
 /**
  * Guards the migration set against the entities.
@@ -45,7 +45,10 @@ function describeEntity(entity: Function) {
 
 /** Every quoted identifier the migrations mention for a given table. */
 function migrationIdentifiersByTable(): Map<string, Set<string>> {
-  const dir = __dirname;
+  // Deliberately lives outside src/migrations: data-source.ts globs that
+  // directory as `src/migrations/*.ts`, so TypeORM would import this spec as a
+  // migration and blow up on `describe` at CLI time.
+  const dir = path.join(__dirname, 'migrations');
   const sql = fs
     .readdirSync(dir)
     .filter((f) => f.endsWith('.ts') && !f.endsWith('.spec.ts'))
@@ -104,7 +107,7 @@ describe('migrations cover the entities', () => {
 
 describe('data-source.ts and app.module.ts agree on entities', () => {
   const entityList = (file: string) => {
-    const source = fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
+    const source = fs.readFileSync(path.join(__dirname, file), 'utf8');
     const match = source.match(/entities:\s*\[([^\]]*)\]/);
     return (match?.[1] ?? '')
       .split(',')
