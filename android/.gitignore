@@ -13,3 +13,17 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+# Signing material — never commit
+*.jks
+*.keystore
+
+# Build outputs
+/app/release/
+
+# JVM crash dumps
+hs_err_pid*.log
+replay_pid*.log
+
+# Kotlin compiler scratch data
+/.kotlin/

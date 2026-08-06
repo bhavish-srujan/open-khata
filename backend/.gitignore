@@ -3,6 +3,9 @@
 /node_modules
 /build
 
+# Scratch output from list_models.js
+models.json
+
 # Logs
 logs
 *.log
