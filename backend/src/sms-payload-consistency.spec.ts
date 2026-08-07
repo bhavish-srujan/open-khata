@@ -1,5 +1,6 @@
 import { ConfigService } from '@nestjs/config';
 import { getRepositoryToken } from '@nestjs/typeorm';
+import { DataSource } from 'typeorm';
 import { Test } from '@nestjs/testing';
 import { JwtService } from '@nestjs/jwt';
 import axios from 'axios';
@@ -54,6 +55,13 @@ describe('SMS payload consistency across every sender', () => {
         RemindersService,
         PartyService,
         { provide: ConfigService, useValue: { get: (k: string) => env[k] } },
+        {
+          provide: DataSource,
+          // PartyService.delete removes dependents transactionally.
+          useValue: { transaction: async (cb) => cb({
+            find: async () => [], delete: async () => undefined, remove: async () => undefined,
+          }) },
+        },
         { provide: JwtService, useValue: { signAsync: jest.fn() } },
         {
           provide: getRepositoryToken(User),

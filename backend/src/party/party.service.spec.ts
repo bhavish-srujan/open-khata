@@ -1,5 +1,6 @@
 import { ConflictException } from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
+import { DataSource } from 'typeorm';
 import { Test, TestingModule } from '@nestjs/testing';
 import { PartyService } from './party.service';
 import { Party } from './party.entity';
@@ -37,6 +38,13 @@ describe('PartyService — client-supplied ids', () => {
       providers: [
         PartyService,
         { provide: SmsService, useValue: { sendSms } },
+        {
+          provide: DataSource,
+          // PartyService.delete removes dependents transactionally.
+          useValue: { transaction: async (cb) => cb({
+            find: async () => [], delete: async () => undefined, remove: async () => undefined,
+          }) },
+        },
         {
           provide: getRepositoryToken(Business),
           // Used only to name the business in the welcome SMS.

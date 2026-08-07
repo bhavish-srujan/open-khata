@@ -170,6 +170,12 @@ describe('customer-facing SMS content', () => {
             useValue: { findOne: async () => business },
           },
           { provide: SmsService, useValue: { sendSms } },
+          {
+            // PartyService.delete removes dependents transactionally; unused by
+            // these tests but required to construct the service.
+            provide: DataSource,
+            useValue: { transaction: async (cb: any) => cb({}) },
+          },
         ],
       }).compile();
 
