@@ -11,7 +11,17 @@ async function bootstrap() {
   // the acting user into and AuditLogSubscriber later reads.
   app.use(auditContextMiddleware);
 
-  app.enableCors();
+  // The Android client sends no Origin header, so it is unaffected by CORS.
+  // A wildcard only widens who can drive this API from a browser, so origins
+  // are opt-in: set CORS_ORIGINS to a comma-separated list to allow any.
+  const allowedOrigins = (process.env.CORS_ORIGINS ?? '')
+    .split(',')
+    .map((o) => o.trim())
+    .filter(Boolean);
+  app.enableCors({
+    origin: allowedOrigins.length > 0 ? allowedOrigins : false,
+    credentials: true,
+  });
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true }));
   
   // No static handler for /uploads/**. Receipts are financial documents and

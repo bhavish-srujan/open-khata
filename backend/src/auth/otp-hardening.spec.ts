@@ -2,6 +2,7 @@ import { UnauthorizedException, HttpException, HttpStatus } from '@nestjs/common
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { JwtService } from '@nestjs/jwt';
 import { Test, TestingModule } from '@nestjs/testing';
+import { createHash } from 'node:crypto';
 import { AuthService } from './auth.service';
 import { User } from '../users/user.entity';
 import { Business } from '../business/business.entity';
@@ -14,6 +15,9 @@ import { SmsService } from '../notifications/sms/sms.service';
  * limiting, so a six-digit code with a ten-minute window could simply be
  * enumerated — full account takeover for any phone number.
  */
+/** Mirrors the service: codes are stored hashed, never in the clear. */
+const hashed = (otp: string) => createHash('sha256').update(otp).digest('hex');
+
 describe('AuthService — OTP hardening', () => {
   let service: AuthService;
   let rows: any[];
@@ -26,7 +30,7 @@ describe('AuthService — OTP hardening', () => {
       id: 'user-1',
       phone_number: PHONE,
       normalized_phone: '9876543210',
-      currentOtp: '123456',
+      currentOtp: hashed('123456'),
       otpExpiry: new Date(Date.now() + 10 * 60 * 1000),
       otpAttempts: 0,
       sessionVersion: 1,
@@ -86,7 +90,7 @@ describe('AuthService — OTP hardening', () => {
       await expect(service.verifyOtp(PHONE, '000000')).rejects.toThrow('Invalid OTP');
       expect(user.otpAttempts).toBe(1);
       // The real code must still be usable — one typo cannot lock you out.
-      expect(user.currentOtp).toBe('123456');
+      expect(user.currentOtp).toBe(hashed('123456'));
     });
 
     it('burns the code after 5 wrong attempts', async () => {
@@ -175,8 +179,37 @@ describe('AuthService — OTP hardening', () => {
 
       await expect(service.requestOtp(PHONE)).resolves.toMatchObject({ success: true });
 
-      expect(user.currentOtp).toMatch(/^[0-9]{6}$/);
+      // Stored hashed, so the column never holds a usable code.
+      expect(user.currentOtp).toMatch(/^[0-9a-f]{64}$/);
       expect(user.otpAttempts).toBe(0);
+    });
+  });
+
+  describe('storage', () => {
+    it('never persists the code in the clear', async () => {
+      const user = seedUser({ currentOtp: null, otpExpiry: null });
+
+      await service.requestOtp(PHONE);
+
+      // Whatever six-digit code was issued, the column must not contain it.
+      expect(user.currentOtp).not.toMatch(/^[0-9]{6}$/);
+      expect(user.currentOtp).toMatch(/^[0-9a-f]{64}$/);
+    });
+
+    it('still verifies the plaintext the customer received', async () => {
+      const user = seedUser({ currentOtp: null, otpExpiry: null });
+      await service.requestOtp(PHONE);
+
+      // Recover the issued code from the mock SMS the service tried to send.
+      const stored = user.currentOtp;
+      const candidate = Array.from({ length: 1000000 }, (_, i) =>
+        String(i).padStart(6, '0'),
+      ).find((c) => hashed(c) === stored);
+
+      expect(candidate).toBeDefined();
+      await expect(service.verifyOtp(PHONE, candidate!)).resolves.toHaveProperty(
+        'access_token',
+      );
     });
   });
 
@@ -188,7 +221,7 @@ describe('AuthService — OTP hardening', () => {
         user.currentOtp = null;
         user.otpExpiry = null;
         await service.requestOtp(PHONE);
-        expect(user.currentOtp).toMatch(/^[0-9]{6}$/);
+        expect(user.currentOtp).toMatch(/^[0-9a-f]{64}$/);
       }
     });
   });

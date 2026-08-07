@@ -6,7 +6,7 @@ import {
   HttpException,
   HttpStatus,
 } from '@nestjs/common';
-import { randomInt, timingSafeEqual } from 'node:crypto';
+import { createHash, randomInt, timingSafeEqual } from 'node:crypto';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -24,6 +24,18 @@ const OTP_RESEND_COOLDOWN_MS = 60 * 1000;
 
 /** Wrong guesses before the code is burned and must be re-requested. */
 const MAX_OTP_ATTEMPTS = 5;
+
+/**
+ * One-way hash of an OTP.
+ *
+ * A plain SHA-256 is appropriate here where it would not be for a password:
+ * the input is exactly six digits with a ten-minute life and a five-attempt
+ * ceiling, so an offline attacker gains nothing from a slow KDF that they do
+ * not already get from enumerating a million candidates.
+ */
+function hashOtp(otp: string): string {
+  return createHash('sha256').update(otp).digest('hex');
+}
 
 /**
  * Constant-time comparison, so response timing cannot be used to learn how much
@@ -139,7 +151,10 @@ export class AuthService {
     const generatedOtp = randomInt(100000, 1000000).toString();
     const expiry = new Date(Date.now() + OTP_TTL_MS);
 
-    user.currentOtp = generatedOtp;
+    // Stored as a hash: a database read — a backup, a support query, a leak —
+    // must not yield a live credential. The plaintext exists only long enough
+    // to be sent.
+    user.currentOtp = hashOtp(generatedOtp);
     user.otpExpiry = expiry;
     user.otpAttempts = 0;
     await this.userRepository.save(user);
@@ -182,7 +197,7 @@ export class AuthService {
        throw new UnauthorizedException('OTP has expired');
     }
 
-    if (!timingSafeEquals(user.currentOtp, otp)) {
+    if (!timingSafeEquals(user.currentOtp, hashOtp(otp))) {
        user.otpAttempts = (user.otpAttempts ?? 0) + 1;
 
        if (user.otpAttempts >= MAX_OTP_ATTEMPTS) {

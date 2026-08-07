@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Debug overlay: cleartext is permitted everywhere, so a developer can point the
+  app at any local or LAN backend from the developer settings dialog. This file
+  replaces the release configuration in debug builds only.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>
