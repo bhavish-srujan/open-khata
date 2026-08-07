@@ -3,7 +3,6 @@ package com.example.khatabook
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.example.khatabook.data.api.NetworkClient
-import com.example.khatabook.data.api.VerifyOtpRequest
 import com.example.khatabook.data.model.PartyType
 import com.example.khatabook.data.model.TransactionType
 import com.example.khatabook.data.repository.KhatabookRepository
@@ -26,8 +25,10 @@ import org.junit.runners.MethodSorters
  * which is the only way to see that a write survives being made offline and is
  * delivered later, and that a pull no longer destroys it.
  *
- * Requires the backend on the host at 10.0.2.2:3000 with a seeded user whose
- * OTP hash corresponds to 123456.
+ * Requires the backend on the host at 10.0.2.2:3000, and a token passed in with
+ * -e authToken <jwt>. The token is injected rather than obtained through the
+ * OTP flow because verification consumes the code, so only the first of these
+ * tests could authenticate — and the auth flow is not what is under test here.
  */
 @RunWith(AndroidJUnit4::class)
 @FixMethodOrder(MethodSorters.NAME_ASCENDING)
@@ -42,19 +43,22 @@ class OutboxInstrumentedTest {
     private lateinit var repo: KhatabookRepository
     private var token: String? = null
 
+    // Must declare Unit explicitly: an expression body returning runBlocking's
+    // result gives JUnit a non-void @Before, which it rejects.
     @Before
-    fun setUp() = runBlocking {
+    fun setUp(): Unit = runBlocking {
         // Start from a clean slate on the device.
         context.getSharedPreferences("khatabook_repository_prefs", 0).edit().clear().commit()
 
         NetworkClient.updateBaseUrl(serverUrl)
         NetworkClient.init { token }
 
-        // Real auth flow against the seeded user.
-        val res = NetworkClient.apiService.verifyOtp(VerifyOtpRequest(phone, "123456"))
-        assertTrue("verify-otp failed: ${res.code()}", res.isSuccessful)
-        token = res.body()!!.access_token
-        assertNotNull(token)
+        token = InstrumentationRegistry.getArguments().getString("authToken")
+        assertNotNull("pass -e authToken <jwt>", token)
+
+        // Prove the token actually works before relying on it.
+        val probe = NetworkClient.apiService.getParties()
+        assertTrue("auth probe failed: ${probe.code()}", probe.isSuccessful)
 
         repo = KhatabookRepository(context)
         repo.setServerUrl(serverUrl)

@@ -26,7 +26,27 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.khatabook.data.api.NetworkClient
 import com.example.khatabook.ui.theme.*
+
+/** ISO-8601 UTC lower bound for a period label. */
+private fun statisticsStartDate(period: String): String {
+    val calendar = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC"))
+    when (period) {
+        "This Month" -> calendar.set(java.util.Calendar.DAY_OF_MONTH, 1)
+        "This Year" -> calendar.set(java.util.Calendar.DAY_OF_YEAR, 1)
+        else -> calendar.timeInMillis = 0L
+    }
+    if (period != "All Time") {
+        calendar.set(java.util.Calendar.HOUR_OF_DAY, 0)
+        calendar.set(java.util.Calendar.MINUTE, 0)
+        calendar.set(java.util.Calendar.SECOND, 0)
+        calendar.set(java.util.Calendar.MILLISECOND, 0)
+    }
+    val format = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US)
+    format.timeZone = java.util.TimeZone.getTimeZone("UTC")
+    return format.format(calendar.time)
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -36,6 +56,57 @@ fun BusinessStatisticsScreen(
 ) {
     var selectedPeriod by remember { mutableStateOf("This Month") } // "This Month", "This Year", "All Time"
     val scrollState = rememberScrollState()
+
+    // Real figures. These were three hardcoded Quintuples, including invented
+    // "top customer" names that corresponded to nobody in the user's data.
+    var cashCollectedState by remember { mutableStateOf(0.0) }
+    var creditGivenState by remember { mutableStateOf(0.0) }
+    var netFlowState by remember { mutableStateOf(0.0) }
+    var totalTxnsState by remember { mutableStateOf(0) }
+    var topCustomerState by remember { mutableStateOf<String?>(null) }
+    var isLoading by remember { mutableStateOf(true) }
+    var loadError by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(selectedPeriod) {
+        isLoading = true
+        loadError = null
+        try {
+            val from = statisticsStartDate(selectedPeriod)
+            val cashflow = NetworkClient.apiService.getCashflow(startDate = from)
+            val feed = NetworkClient.apiService.getBusinessLedger(from = from)
+
+            val body = cashflow.body()
+            if (cashflow.isSuccessful && body != null) {
+                cashCollectedState = body.totalIn
+                creditGivenState = body.totalOut
+                netFlowState = body.net
+            } else {
+                loadError = when (cashflow.code()) {
+                    401 -> "Session expired. Please log in again."
+                    403 -> "You do not have permission to view statistics."
+                    else -> "Could not load statistics (HTTP ${cashflow.code()})."
+                }
+            }
+
+            val rows = feed.body()
+            if (feed.isSuccessful && rows != null) {
+                totalTxnsState = rows.size
+                // Whoever accounts for the most received money in the period.
+                topCustomerState = rows
+                    .filter { it.type == "GOT" }
+                    .groupBy { it.party?.name }
+                    .mapNotNull { (name, entries) ->
+                        name?.let { it to entries.sumOf { e -> e.amount } }
+                    }
+                    .maxByOrNull { it.second }
+                    ?.first
+            }
+        } catch (e: Exception) {
+            loadError = "Could not reach the server. Check your connection."
+        } finally {
+            isLoading = false
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -110,12 +181,13 @@ fun BusinessStatisticsScreen(
                 transitionSpec = { fadeIn() togetherWith fadeOut() },
                 label = "statsTransition"
             ) { targetPeriod ->
-                // Dynamic stats values computed based on the animated target state
-                val (cashCollected, creditGiven, netFlow, totalTxns, topCustomer) = when (targetPeriod) {
-                    "This Month" -> Quintuple(14500.0, 3800.0, 10700.0, 24, "Ramesh Kumar")
-                    "This Year" -> Quintuple(165000.0, 42000.0, 123000.0, 186, "Vikram Singh")
-                    else -> Quintuple(380000.0, 95000.0, 285000.0, 412, "Ramesh Kumar")
-                }
+                // Figures for the selected period, fetched above.
+                @Suppress("UNUSED_PARAMETER") val period = targetPeriod
+                val cashCollected = cashCollectedState
+                val creditGiven = creditGivenState
+                val netFlow = netFlowState
+                val totalTxns = totalTxnsState
+                val topCustomer = topCustomerState ?: "No activity yet"
 
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     // Net Balance Hero Card
@@ -245,10 +317,3 @@ fun BusinessStatisticsScreen(
 }
 
 // Simple Helper data class
-private data class Quintuple<A, B, C, D, E>(
-    val first: A,
-    val second: B,
-    val third: C,
-    val fourth: D,
-    val fifth: E
-)

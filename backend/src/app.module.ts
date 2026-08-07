@@ -5,8 +5,6 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { buildDatabaseSsl } from './database-ssl';
-import { AppController } from './app.controller';
-import { AppService } from './app.service';
 import { PartyModule } from './party/party.module';
 import { LedgerModule } from './ledger/ledger.module';
 import { Business } from './business/business.entity';
@@ -76,7 +74,7 @@ import { NotificationsModule } from './notifications/notifications.module';
     UploadsModule,
     NotificationsModule,
   ],
-  controllers: [AppController, HealthController],
-  providers: [AppService, { provide: APP_GUARD, useClass: ThrottlerGuard }],
+  controllers: [HealthController],
+  providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
 export class AppModule {}

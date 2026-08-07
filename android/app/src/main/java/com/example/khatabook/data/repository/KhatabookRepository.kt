@@ -14,6 +14,10 @@ import com.example.khatabook.data.model.TransactionType
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.content.SharedPreferences
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -57,6 +61,7 @@ class KhatabookRepository(private val context: Context) {
         val savedUrl = getServerUrl()
         NetworkClient.updateBaseUrl(savedUrl)
         loadData()
+        startConnectivityFlush()
     }
 
     fun getServerUrl(): String {
@@ -94,6 +99,35 @@ class KhatabookRepository(private val context: Context) {
         saveOutbox()
         // Try immediately; if there is no network the record simply stays queued.
         remoteScope.launch { flushOutbox() }
+    }
+
+    /**
+     * Flushes whenever the device regains connectivity.
+     *
+     * Without this, delivery depended entirely on the user reaching a screen
+     * that happens to flush — login or a customer ledger. Someone who worked
+     * offline and then stayed on the parties list could hold unsent writes
+     * indefinitely.
+     */
+    private fun startConnectivityFlush() {
+        val manager = context.getSystemService(ConnectivityManager::class.java) ?: return
+        val request = NetworkRequest.Builder()
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            .build()
+
+        try {
+            manager.registerNetworkCallback(
+                request,
+                object : ConnectivityManager.NetworkCallback() {
+                    override fun onAvailable(network: Network) {
+                        remoteScope.launch { flushOutbox() }
+                    }
+                },
+            )
+        } catch (_: Exception) {
+            // Registration can fail if too many callbacks are already active.
+            // The queue is still drained on login and on opening a ledger.
+        }
     }
 
     /** Pending operation count, for tests and diagnostics. */
@@ -480,12 +514,6 @@ class KhatabookRepository(private val context: Context) {
         )
     }
 
-    fun updateParty(updatedParty: Party) {
-        _parties.value = _parties.value.map { party ->
-            if (party.id == updatedParty.id) updatedParty else party
-        }
-        saveData()
-    }
 
     fun deleteParty(partyId: String) {
         _parties.value = _parties.value.filter { it.id != partyId }
