@@ -1,10 +1,13 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { existsSync } from 'fs';
 import { join } from 'path';
 import { Receipt } from './receipt.entity';
 import { RECEIPTS_DIR } from './uploads.config';
+
+/** Per-business ceiling, so one tenant cannot exhaust the shared disk. */
+const MAX_RECEIPTS_PER_BUSINESS = 2000;
 
 @Injectable()
 export class UploadsService {
@@ -13,12 +16,25 @@ export class UploadsService {
     private readonly receiptRepository: Repository<Receipt>,
   ) {}
 
-  /** Records ownership for a freshly stored file. */
+  /**
+   * Records ownership for a freshly stored file.
+   *
+   * Enforces a per-business ceiling. The size limit alone bounds one request,
+   * not the total: with local disk and no quota, a single business could fill
+   * the volume and take the service down for everyone.
+   */
   async record(
     file: Express.Multer.File,
     businessId: string,
     uploadedBy: string,
   ): Promise<Receipt> {
+    const held = await this.receiptRepository.count({ where: { businessId } });
+    if (held >= MAX_RECEIPTS_PER_BUSINESS) {
+      throw new ForbiddenException(
+        `Receipt limit reached (${MAX_RECEIPTS_PER_BUSINESS}). Delete older receipts before uploading more.`,
+      );
+    }
+
     const receipt = this.receiptRepository.create({
       businessId,
       uploadedBy,

@@ -45,6 +45,11 @@ export class UploadsController {
       }),
       limits: {
         fileSize: 5 * 1024 * 1024, // 5MB limit
+        // One file per request, and no stray fields: without these a caller can
+        // attach many files to a single request and bypass the size limit in
+        // aggregate.
+        files: 1,
+        parts: 5,
       },
       fileFilter: (req, file, cb) => {
         // Allow only images and PDFs

@@ -41,6 +41,9 @@ describe('UploadsController', () => {
   const FILE_BODY = 'pretend-png-bytes';
 
   // Rows the stubbed repository serves.
+  /** Rows the quota check believes the business already holds. */
+  let receiptCount = 0;
+
   const receipts: Receipt[] = [
     Object.assign(new Receipt(), {
       id: OWNED_ID,
@@ -74,6 +77,8 @@ describe('UploadsController', () => {
           provide: getRepositoryToken(Receipt),
           useValue: {
             create: (o: any) => Object.assign(new Receipt(), o),
+            // Backs the per-business quota check.
+            count: jest.fn(async () => receiptCount),
             save: jest.fn(async (r: any) => ({ ...r, id: 'new-receipt-id' })),
             // Models a real repository: matches on whichever keys the query
             // actually carries. Hardcoding id AND businessId here would make
@@ -286,6 +291,19 @@ describe('UploadsController', () => {
       // Clean up whatever multer wrote.
       const saved = repo.save.mock.calls.at(-1)[0];
       rmSync(join(RECEIPTS_DIR, saved.filename), { force: true });
+    });
+
+    it('refuses an upload once the business hits its receipt ceiling', async () => {
+      receiptCount = 2000;
+
+      const res = await request(app.getHttpServer())
+        .post('/uploads/receipt')
+        .set('Authorization', `Bearer ${token(BUSINESS_A)}`)
+        .attach('file', Buffer.from(FILE_BODY), 'receipt.png');
+
+      // Without a quota one tenant can fill the shared disk for everyone.
+      expect(res.status).toBe(403);
+      receiptCount = 0;
     });
 
     it('still rejects a disallowed file type', async () => {
