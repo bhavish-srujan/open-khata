@@ -292,6 +292,16 @@ export class LedgerService {
         await manager.save(history);
       }
 
+      // Release the history rows written when this entry was created. Their
+      // foreign key is ON DELETE NO ACTION, so leaving them pointed at the row
+      // makes the delete below fail outright — every delete returned 500.
+      // Detaching rather than deleting keeps the balance trail intact.
+      await manager.update(
+        BalanceHistory,
+        { ledgerEntryId: entry.id },
+        { ledgerEntryId: null },
+      );
+
       await manager.remove(entry);
     });
   }

@@ -23,6 +23,7 @@
     "migration:run": "npm run typeorm -- migration:run -d src/data-source.ts",
     "migration:revert": "npm run typeorm -- migration:revert -d src/data-source.ts",
     "reset-db": "npx ts-node scripts/reset-db.ts",
+    "smoke": "node scripts/smoke.js",
     "reset-db:all": "npx ts-node scripts/reset-db.ts --all"
   },
   "dependencies": {

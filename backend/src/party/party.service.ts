@@ -1,8 +1,11 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { Party } from './party.entity';
 import { Business } from '../business/business.entity';
+import { Bill } from '../bills/entities/bill.entity';
+import { LedgerEntry } from '../ledger/ledger-entry.entity';
+import { BalanceHistory } from '../ledger/balance-history.entity';
 import { CreatePartyDto } from './dto/create-party.dto';
 import { SmsService } from '../notifications/sms/sms.service';
 
@@ -18,6 +21,7 @@ export class PartyService {
     @InjectRepository(Business)
     private readonly businessRepository: Repository<Business>,
     private readonly smsService: SmsService,
+    private readonly dataSource: DataSource,
   ) {}
 
   findAll(businessId: string, type?: 'CUSTOMER' | 'SUPPLIER'): Promise<Party[]> {
@@ -103,9 +107,36 @@ export class PartyService {
     return existing;
   }
 
+  /**
+   * Removes a party and the records that depend on it.
+   *
+   * Every dependent foreign key is ON DELETE NO ACTION, so removing a party
+   * that had any activity previously failed with a constraint violation and a
+   * 500 — the delete only ever worked for a party with no transactions.
+   *
+   * Dependents are removed in foreign key order inside one transaction, via the
+   * entity manager rather than raw SQL so the audit subscriber records each
+   * removed ledger entry and bill. Bills are included deliberately: an invoice
+   * for a party that no longer exists cannot be rendered or reconciled.
+   */
   async delete(id: string, businessId: string): Promise<void> {
     const party = await this.findOne(id, businessId);
-    await this.partyRepository.remove(party);
+
+    await this.dataSource.transaction(async (manager) => {
+      const bills = await manager.find(Bill, { where: { partyId: id, businessId } });
+      if (bills.length) await manager.remove(bills);
+
+      // Detach history from the entries first; it also references the party, so
+      // it is removed immediately afterwards.
+      await manager.delete(BalanceHistory, { partyId: id, businessId });
+
+      const entries = await manager.find(LedgerEntry, {
+        where: { partyId: id, businessId },
+      });
+      if (entries.length) await manager.remove(entries);
+
+      await manager.remove(party);
+    });
   }
 
   /** Called by LedgerService to atomically update the running balance. We shouldn't use findOne + update to avoid race conditions. */
