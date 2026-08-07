@@ -1,4 +1,5 @@
 import { DataSource } from 'typeorm';
+import { buildDatabaseSsl } from './database-ssl';
 import { config } from 'dotenv';
 import { User } from './users/user.entity';
 import { Party } from './party/party.entity';
@@ -20,6 +21,8 @@ if (!databaseUrl) {
 export const AppDataSource = new DataSource({
   type: 'postgres',
   url: databaseUrl,
+  // Same rule as the app, so migrations and runtime agree on trust.
+  ssl: buildDatabaseSsl(databaseUrl),
   synchronize: false,
   logging: true,
   // Must match app.module.ts exactly, or migration:generate will emit DROP

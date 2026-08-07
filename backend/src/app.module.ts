@@ -4,6 +4,7 @@ import { APP_GUARD } from '@nestjs/core';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { buildDatabaseSsl } from './database-ssl';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { PartyModule } from './party/party.module';
@@ -50,9 +51,12 @@ import { NotificationsModule } from './notifications/notifications.module';
         if (!databaseUrl && configService.get<string>('NODE_ENV') === 'production') {
           throw new Error('DATABASE_URL is required in production. Set DATABASE_URL in your environment configuration.');
         }
+        const url = databaseUrl || 'postgresql://postgres:password@localhost:5432/khatabook';
         return {
           type: 'postgres',
-          url: databaseUrl || 'postgresql://postgres:password@localhost:5432/khatabook',
+          url,
+          // Verified TLS for any remote database; plain for local docker.
+          ssl: buildDatabaseSsl(url),
           entities: [User, Party, LedgerEntry, Business, BalanceHistory, Item, AuditLog, Bill, Receipt],
           synchronize: configService.get<string>('NODE_ENV') !== 'production', // Use migrations in production
         };
