@@ -15,11 +15,34 @@ import {
 import { LedgerEntry } from './ledger-entry.entity';
 import { Party } from '../party/party.entity';
 import { CreateLedgerEntryDto } from './dto/create-ledger-entry.dto';
+import { UpdateLedgerEntryDto } from './dto/update-ledger-entry.dto';
 import { BalanceHistory } from './balance-history.entity';
 import { SmsService } from '../notifications/sms/sms.service';
 
 /** Upper bound on the business-wide feed, so one call cannot pull a whole ledger. */
 const MAX_LEDGER_FEED_ROWS = 500;
+
+/**
+ * Signed effect of an entry on its party's running balance.
+ *
+ * CUSTOMER: GAVE means credit extended to them, so they owe us more (+);
+ * GOT means they paid us (-). SUPPLIER inverts both, which is why a positive
+ * supplier balance means we owe them.
+ *
+ * Extracted so create, update and delete cannot drift apart — the reminder
+ * scheduler and the app's "You will get" labels all depend on this convention.
+ */
+function balanceDelta(
+  partyType: Party['type'],
+  entryType: 'GAVE' | 'GOT',
+  amount: number,
+): number {
+  const magnitude = Number(amount);
+  if (partyType === 'CUSTOMER') {
+    return entryType === 'GAVE' ? magnitude : -magnitude;
+  }
+  return entryType === 'GAVE' ? -magnitude : magnitude;
+}
 
 @Injectable()
 export class LedgerService {
@@ -96,16 +119,9 @@ export class LedgerService {
       const previousBalance = Number(party.currentBalance);
 
       // 2. Calculate delta
-      const delta =
-        party.type === 'CUSTOMER'
-          ? dto.type === 'GAVE'
-            ? dto.amount
-            : -dto.amount
-          : dto.type === 'GAVE'
-            ? -dto.amount
-            : dto.amount;
+      const delta = balanceDelta(party.type, dto.type, dto.amount);
 
-      const newBalance = previousBalance + Number(delta);
+      const newBalance = previousBalance + delta;
 
       // 3. Update party balance
       party.currentBalance = newBalance;
@@ -148,6 +164,73 @@ export class LedgerService {
     });
   }
 
+  /**
+   * Edits an existing entry's amount and/or note.
+   *
+   * The balance is adjusted by the difference between the new and old deltas,
+   * inside the same party lock the other writes use. That difference is what
+   * makes this naturally idempotent: replaying the same edit computes an
+   * adjustment of zero, because the stored amount already equals the new one.
+   */
+  async update(
+    entryId: string,
+    businessId: string,
+    dto: UpdateLedgerEntryDto,
+  ): Promise<LedgerEntry> {
+    return this.dataSource.transaction(async (manager) => {
+      const entry = await manager.findOne(LedgerEntry, {
+        where: { id: entryId, businessId },
+      });
+      if (!entry) {
+        throw new NotFoundException(`LedgerEntry ${entryId} not found`);
+      }
+
+      const party = await manager
+        .createQueryBuilder(Party, 'party')
+        .setLock('pessimistic_write')
+        .where('party.id = :id AND party.business_id = :businessId', {
+          id: entry.partyId,
+          businessId,
+        })
+        .getOne();
+
+      if (!party) {
+        throw new NotFoundException(`Party ${entry.partyId} not found in business`);
+      }
+
+      if (dto.note !== undefined) {
+        entry.note = dto.note;
+      }
+
+      if (dto.amount !== undefined) {
+        const previousBalance = Number(party.currentBalance);
+        const adjustment =
+          balanceDelta(party.type, entry.type, dto.amount) -
+          balanceDelta(party.type, entry.type, entry.amount);
+
+        if (adjustment !== 0) {
+          const newBalance = previousBalance + adjustment;
+          party.currentBalance = newBalance;
+          await manager.save(party);
+
+          await manager.save(
+            manager.create(BalanceHistory, {
+              businessId,
+              partyId: entry.partyId,
+              ledgerEntryId: entry.id,
+              previousBalance,
+              newBalance,
+            }),
+          );
+        }
+
+        entry.amount = dto.amount;
+      }
+
+      return manager.save(entry);
+    });
+  }
+
   async delete(entryId: string, businessId: string): Promise<void> {
     return this.dataSource.transaction(async (manager) => {
       const entry = await manager.findOne(LedgerEntry, { where: { id: entryId, businessId } });
@@ -162,16 +245,10 @@ export class LedgerService {
       if (party) {
         const previousBalance = Number(party.currentBalance);
         
-        const reverseDelta =
-          party.type === 'CUSTOMER'
-            ? entry.type === 'GAVE'
-              ? -Number(entry.amount)
-              : Number(entry.amount)
-            : entry.type === 'GAVE'
-              ? Number(entry.amount)
-              : -Number(entry.amount);
+        // Removing an entry undoes exactly the delta it applied.
+        const reverseDelta = -balanceDelta(party.type, entry.type, entry.amount);
 
-        const newBalance = previousBalance + Number(reverseDelta);
+        const newBalance = previousBalance + reverseDelta;
 
         party.currentBalance = newBalance;
         await manager.save(party);

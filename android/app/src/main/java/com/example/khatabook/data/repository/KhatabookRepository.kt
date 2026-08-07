@@ -3,6 +3,7 @@ package com.example.khatabook.data.repository
 import com.example.khatabook.data.api.CreateLedgerEntryRequest
 import com.example.khatabook.data.api.CreatePartyRequest
 import com.example.khatabook.data.api.NetworkClient
+import com.example.khatabook.data.api.UpdateLedgerEntryRequest
 import com.example.khatabook.data.model.CollectionFrequency
 import com.example.khatabook.data.model.EntrySource
 import com.example.khatabook.data.model.EntryStatus
@@ -17,6 +18,8 @@ import android.content.SharedPreferences
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -33,8 +36,20 @@ class KhatabookRepository(private val context: Context) {
     private val _ledgerEntries = MutableStateFlow<List<LedgerEntry>>(emptyList())
     val ledgerEntries: StateFlow<List<LedgerEntry>> = _ledgerEntries.asStateFlow()
 
-    // Background scope for fire-and-forget remote writes
+    // Background scope used to kick the outbox after a local write.
     private val remoteScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /**
+     * Mutations awaiting delivery, oldest first.
+     *
+     * Order is load-bearing: an entry's create must not be sent before the
+     * create of the party it references, so a failure stops the flush rather
+     * than skipping ahead.
+     */
+    private var outbox: MutableList<PendingOp> = mutableListOf()
+
+    /** Guards the flush so two callers cannot send the same record twice. */
+    private val flushMutex = Mutex()
 
     private var activePhoneNumber: String = ""
 
@@ -53,11 +68,123 @@ class KhatabookRepository(private val context: Context) {
         NetworkClient.updateBaseUrl(url)
     }
 
+    // ─── Outbox ────────────────────────────────────────────────────
+
+    private fun loadOutbox() {
+        if (activePhoneNumber.isBlank()) {
+            outbox = mutableListOf()
+            return
+        }
+        val json = prefs.getString("outbox_$activePhoneNumber", null)
+        outbox = if (json != null) {
+            val type = TypeToken.getParameterized(List::class.java, PendingOp::class.java).type
+            (gson.fromJson<List<PendingOp>>(json, type) ?: emptyList()).toMutableList()
+        } else {
+            mutableListOf()
+        }
+    }
+
+    private fun saveOutbox() {
+        if (activePhoneNumber.isBlank()) return
+        prefs.edit().putString("outbox_$activePhoneNumber", gson.toJson(outbox)).apply()
+    }
+
+    private fun enqueue(op: PendingOp) {
+        outbox.add(op)
+        saveOutbox()
+        // Try immediately; if there is no network the record simply stays queued.
+        remoteScope.launch { flushOutbox() }
+    }
+
+    /** Pending operation count, for tests and diagnostics. */
+    fun pendingOperationCount(): Int = outbox.size
+
+    private fun pendingTargetIds(type: PendingOpType): Set<String> =
+        outbox.filter { it.type == type }.map { it.targetId }.toSet()
+
+    /**
+     * Sends queued mutations in order, stopping at the first that cannot be
+     * delivered so ordering is preserved. Safe to call repeatedly.
+     *
+     * @return true when the queue drained completely.
+     */
+    suspend fun flushOutbox(): Boolean = flushMutex.withLock {
+        if (activePhoneNumber.isBlank()) return@withLock false
+
+        while (outbox.isNotEmpty()) {
+            val op = outbox.first()
+
+            val outcome = try {
+                classify(send(op))
+            } catch (_: Exception) {
+                // No connectivity, DNS failure, timeout: keep everything queued.
+                FlushOutcome.RETRY
+            }
+
+            when (outcome) {
+                FlushOutcome.SENT -> {
+                    outbox.removeAt(0)
+                    saveOutbox()
+                }
+
+                FlushOutcome.DROP -> {
+                    // The server will never accept this record. Discard it
+                    // rather than blocking everything queued behind it.
+                    outbox.removeAt(0)
+                    saveOutbox()
+                }
+
+                FlushOutcome.RETRY -> {
+                    val attempted = op.copy(attempts = op.attempts + 1)
+                    if (attempted.attempts >= MAX_OP_ATTEMPTS) {
+                        // Poison record: drop it so the queue can move again.
+                        outbox.removeAt(0)
+                    } else {
+                        outbox[0] = attempted
+                    }
+                    saveOutbox()
+                    return@withLock false
+                }
+            }
+        }
+        true
+    }
+
+    /** Performs the HTTP call for one queued operation, returning its status. */
+    private suspend fun send(op: PendingOp): Int = when (op.type) {
+        PendingOpType.CREATE_PARTY ->
+            NetworkClient.apiService.createParty(
+                gson.fromJson(op.payload, CreatePartyRequest::class.java)
+            ).code()
+
+        PendingOpType.DELETE_PARTY ->
+            NetworkClient.apiService.deleteParty(op.targetId).code()
+
+        PendingOpType.CREATE_ENTRY ->
+            NetworkClient.apiService.createLedgerEntry(
+                gson.fromJson(op.payload, CreateLedgerEntryRequest::class.java)
+            ).code()
+
+        PendingOpType.UPDATE_ENTRY ->
+            NetworkClient.apiService.updateLedgerEntry(
+                op.targetId,
+                gson.fromJson(op.payload, UpdateLedgerEntryRequest::class.java)
+            ).code()
+
+        PendingOpType.DELETE_ENTRY ->
+            NetworkClient.apiService.deleteLedgerEntry(op.targetId).code()
+    }
+
     // ─── Remote Sync ───────────────────────────────────────────────
 
     /**
-     * Fetches the party list from the server and merges it into the local
-     * state and SharedPreferences. Safe to call after login.
+     * Pulls the party list and merges it into local state.
+     *
+     * This used to assign the server's list wholesale. Because it runs straight
+     * after login, any party created while offline whose create had not yet
+     * been delivered was destroyed at that moment. Local rows that still have a
+     * pending create are now preserved; everything else comes from the server,
+     * which is authoritative for anything already synced.
      */
     suspend fun syncPartiesFromServer(): Boolean {
         return try {
@@ -75,7 +202,17 @@ class KhatabookRepository(private val context: Context) {
                         businessId = r.businessId ?: "biz_1"
                     )
                 }
-                _parties.value = mapped
+
+                val serverIds = mapped.map { it.id }.toSet()
+                val awaitingCreate = pendingTargetIds(PendingOpType.CREATE_PARTY)
+                // A row absent from the server but still queued for creation has
+                // simply not been delivered yet. A row absent with nothing
+                // queued was deleted server-side and should go.
+                val unsynced = _parties.value.filter {
+                    it.id !in serverIds && it.id in awaitingCreate
+                }
+
+                _parties.value = unsynced + mapped
                 saveData()
                 true
             } else false
@@ -103,9 +240,15 @@ class KhatabookRepository(private val context: Context) {
                         status = EntryStatus.CONFIRMED
                     )
                 }
-                // Replace only entries for this party, keep others
+                val serverIds = mapped.map { it.id }.toSet()
+                val awaitingCreate = pendingTargetIds(PendingOpType.CREATE_ENTRY)
+                // Same rule as parties: keep undelivered local entries for this
+                // party, take everything else from the server.
+                val unsynced = _ledgerEntries.value.filter {
+                    it.partyId == partyId && it.id !in serverIds && it.id in awaitingCreate
+                }
                 val others = _ledgerEntries.value.filter { it.partyId != partyId }
-                _ledgerEntries.value = mapped + others
+                _ledgerEntries.value = unsynced + mapped + others
                 saveData()
                 true
             } else false
@@ -119,6 +262,7 @@ class KhatabookRepository(private val context: Context) {
     }
 
     private fun loadData() {
+        loadOutbox()
         if (activePhoneNumber.isBlank()) return
         
         val partiesJson = prefs.getString("parties_data_$activePhoneNumber", null)
@@ -169,9 +313,11 @@ class KhatabookRepository(private val context: Context) {
         _parties.value = listOf(newParty) + _parties.value
         saveData()
         // Remote write (fire-and-forget — local state already updated)
-        remoteScope.launch {
-            try {
-                NetworkClient.apiService.createParty(
+        enqueue(
+            PendingOp(
+                type = PendingOpType.CREATE_PARTY,
+                targetId = newParty.id,
+                payload = gson.toJson(
                     CreatePartyRequest(
                         id = newParty.id,
                         name = name,
@@ -179,8 +325,8 @@ class KhatabookRepository(private val context: Context) {
                         type = type.name
                     )
                 )
-            } catch (_: Exception) { /* offline — will sync on next launch */ }
-        }
+            )
+        )
         // Trigger SMS Intent for new customer
         try {
             val message = "Hi $name, welcome to Khatabook! Your profile has been created."
@@ -257,9 +403,11 @@ class KhatabookRepository(private val context: Context) {
         _ledgerEntries.value = listOf(newEntry) + _ledgerEntries.value
         saveData()
         // Remote write (fire-and-forget)
-        remoteScope.launch {
-            try {
-                NetworkClient.apiService.createLedgerEntry(
+        enqueue(
+            PendingOp(
+                type = PendingOpType.CREATE_ENTRY,
+                targetId = newEntry.id,
+                payload = gson.toJson(
                     CreateLedgerEntryRequest(
                         id = newEntry.id,
                         partyId = partyId,
@@ -270,8 +418,8 @@ class KhatabookRepository(private val context: Context) {
                         source = source.name
                     )
                 )
-            } catch (_: Exception) { /* offline */ }
-        }
+            )
+        )
         // Trigger SMS Intent for transaction
         try {
             val updatedParty = _parties.value.find { it.id == partyId }
@@ -313,6 +461,10 @@ class KhatabookRepository(private val context: Context) {
 
         _ledgerEntries.value = _ledgerEntries.value.filter { it.id != entryId }
         saveData()
+
+        // Previously local-only: the entry stayed on the server forever and the
+        // two balances silently diverged.
+        enqueue(PendingOp(type = PendingOpType.DELETE_ENTRY, targetId = entryId))
     }
 
     fun updateLedgerEntry(entryId: String, amount: Double, note: String) {
@@ -340,6 +492,16 @@ class KhatabookRepository(private val context: Context) {
             }
         }
         saveData()
+
+        // Previously local-only, so an edited amount never reached the server
+        // and the running balances diverged permanently.
+        enqueue(
+            PendingOp(
+                type = PendingOpType.UPDATE_ENTRY,
+                targetId = entryId,
+                payload = gson.toJson(UpdateLedgerEntryRequest(amount = amount, note = note))
+            )
+        )
     }
 
     fun updateParty(updatedParty: Party) {
@@ -353,8 +515,6 @@ class KhatabookRepository(private val context: Context) {
         _parties.value = _parties.value.filter { it.id != partyId }
         _ledgerEntries.value = _ledgerEntries.value.filter { it.partyId != partyId }
         saveData()
-        remoteScope.launch {
-            try { NetworkClient.apiService.deleteParty(partyId) } catch (_: Exception) {}
-        }
+        enqueue(PendingOp(type = PendingOpType.DELETE_PARTY, targetId = partyId))
     }
 }

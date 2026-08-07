@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Patch,
   Delete,
   Body,
   Param,
@@ -16,6 +17,7 @@ import {
 import { LedgerService } from './ledger.service';
 import { CreateLedgerEntryDto } from './dto/create-ledger-entry.dto';
 import { ListLedgerQueryDto } from './dto/list-ledger-query.dto';
+import { UpdateLedgerEntryDto } from './dto/update-ledger-entry.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
 @UseGuards(JwtAuthGuard)
@@ -59,6 +61,17 @@ export class LedgerController {
   createLedgerEntry(@Req() req, @Headers() headers, @Body() dto: CreateLedgerEntryDto) {
     const businessId = this.extractBusinessId(req, headers);
     return this.ledgerService.create(businessId, dto);
+  }
+
+  @Patch(':id')
+  updateLedgerEntry(
+    @Req() req,
+    @Headers() headers,
+    @Param('id') id: string,
+    @Body() dto: UpdateLedgerEntryDto,
+  ) {
+    const businessId = this.extractBusinessId(req, headers);
+    return this.ledgerService.update(id, businessId, dto);
   }
 
   @Delete(':id')

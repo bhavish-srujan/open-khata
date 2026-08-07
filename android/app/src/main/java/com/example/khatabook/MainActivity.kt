@@ -382,6 +382,11 @@ class MainActivity : AppCompatActivity() {
                                             updateLoginState(true)
                                             // Pull the latest party list from the server
                                             coroutineScope.launch {
+                                                // Deliver anything queued while
+                                                // signed out before pulling, so
+                                                // the merge sees an accurate
+                                                // picture of what is unsynced.
+                                                repository.flushOutbox()
                                                 repository.syncPartiesFromServer()
                                             }
                                             navStack.clear()
@@ -457,6 +462,14 @@ class MainActivity : AppCompatActivity() {
                                 AppScreen.CUSTOMER_LEDGER -> {
                                     val currentParty = activePartyForLedger ?: parties.firstOrNull() ?: Party(id = "cust_1", name = "Customer", phone = "+91 99999 88888")
                                     val updatedParty = parties.find { it.id == currentParty.id } ?: currentParty
+
+                                    // syncLedgerEntriesFromServer existed but was
+                                    // never called, so this screen only ever showed
+                                    // whatever happened to be on this device.
+                                    LaunchedEffect(updatedParty.id) {
+                                        repository.flushOutbox()
+                                        repository.syncLedgerEntriesFromServer(updatedParty.id)
+                                    }
 
                                     CustomerLedgerScreen(
                                         party = updatedParty,

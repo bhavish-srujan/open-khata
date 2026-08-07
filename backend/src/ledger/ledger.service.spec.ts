@@ -1,4 +1,4 @@
-import { ConflictException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { Test, TestingModule } from '@nestjs/testing';
@@ -58,6 +58,17 @@ describe('LedgerService — idempotent create', () => {
           }),
         }),
       }),
+      // Used by update(). Matches on whichever keys the query carries, so a
+      // service that stopped scoping by business would be caught rather than
+      // silently returning nothing.
+      findOne: async (Entity: any, { where }: any) => {
+        if (Entity !== LedgerEntry) return null;
+        return (
+          entries.find((e) =>
+            Object.entries(where).every(([k, v]) => (e as any)[k] === v),
+          ) ?? null
+        );
+      },
       findOneBy: async (Entity: any, where: any) => {
         if (Entity !== LedgerEntry) return null;
         return entries.find((e) => e.id === where.id) ?? null;
@@ -184,6 +195,114 @@ describe('LedgerService — idempotent create', () => {
     ).rejects.toBeInstanceOf(ConflictException);
 
     expect(entries).toHaveLength(1);
+  });
+
+  /**
+   * Editing an entry adjusts the balance by the difference between the new and
+   * old deltas. Getting that wrong either strands the old amount in the balance
+   * or double-counts the new one.
+   */
+  describe('update', () => {
+    const seedEntry = (over: Partial<LedgerEntry> = {}) => {
+      const e = Object.assign(new LedgerEntry(), {
+        id: CLIENT_ID,
+        businessId: BUSINESS_A,
+        partyId: PARTY_ID,
+        amount: 500,
+        type: 'GAVE',
+        note: 'original',
+        ...over,
+      });
+      entries.push(e);
+      return e;
+    };
+
+    it('raises the balance when a CUSTOMER GAVE entry increases', async () => {
+      party.currentBalance = 500;
+      seedEntry({ amount: 500, type: 'GAVE' });
+
+      await service.update(CLIENT_ID, BUSINESS_A, { amount: 800 });
+
+      // +800 owed instead of +500.
+      expect(Number(party.currentBalance)).toBe(800);
+    });
+
+    it('lowers the balance when the amount decreases', async () => {
+      party.currentBalance = 500;
+      seedEntry({ amount: 500, type: 'GAVE' });
+
+      await service.update(CLIENT_ID, BUSINESS_A, { amount: 200 });
+
+      expect(Number(party.currentBalance)).toBe(200);
+    });
+
+    it('inverts correctly for a GOT entry', async () => {
+      party.currentBalance = -500;
+      seedEntry({ amount: 500, type: 'GOT' });
+
+      await service.update(CLIENT_ID, BUSINESS_A, { amount: 900 });
+
+      // GOT on a CUSTOMER is negative, so a larger receipt lowers the balance.
+      expect(Number(party.currentBalance)).toBe(-900);
+    });
+
+    it('inverts again for a SUPPLIER', async () => {
+      party.type = 'SUPPLIER';
+      party.currentBalance = -500;
+      seedEntry({ amount: 500, type: 'GAVE' });
+
+      await service.update(CLIENT_ID, BUSINESS_A, { amount: 700 });
+
+      expect(Number(party.currentBalance)).toBe(-700);
+    });
+
+    it('is idempotent — replaying the same edit moves nothing', async () => {
+      party.currentBalance = 500;
+      seedEntry({ amount: 500, type: 'GAVE' });
+
+      await service.update(CLIENT_ID, BUSINESS_A, { amount: 800 });
+      await service.update(CLIENT_ID, BUSINESS_A, { amount: 800 });
+      await service.update(CLIENT_ID, BUSINESS_A, { amount: 800 });
+
+      expect(Number(party.currentBalance)).toBe(800);
+    });
+
+    it('writes one balance-history row per real change', async () => {
+      party.currentBalance = 500;
+      seedEntry({ amount: 500, type: 'GAVE' });
+
+      await service.update(CLIENT_ID, BUSINESS_A, { amount: 800 });
+      await service.update(CLIENT_ID, BUSINESS_A, { amount: 800 });
+
+      expect(history).toHaveLength(1);
+    });
+
+    it('updates a note without touching the balance', async () => {
+      party.currentBalance = 500;
+      const entry = seedEntry({ amount: 500 });
+
+      await service.update(CLIENT_ID, BUSINESS_A, { note: 'corrected' });
+
+      expect(entry.note).toBe('corrected');
+      expect(Number(party.currentBalance)).toBe(500);
+      expect(history).toHaveLength(0);
+    });
+
+    it('refuses an entry belonging to another business', async () => {
+      seedEntry({ businessId: BUSINESS_B });
+
+      await expect(
+        service.update(CLIENT_ID, BUSINESS_A, { amount: 800 }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('refuses an entry that does not exist', async () => {
+      await expect(
+        service.update('55555555-5555-4555-8555-555555555555', BUSINESS_A, {
+          amount: 800,
+        }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
   });
 
   describe('findByBusiness (cashbook feed)', () => {

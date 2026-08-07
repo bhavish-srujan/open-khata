@@ -69,6 +69,13 @@ data class LedgerEntryResponse(
     val createdAt: String
 )
 
+/** Editable fields on an existing entry. Type and party are not changeable. */
+@Keep
+data class UpdateLedgerEntryRequest(
+    val amount: Double? = null,
+    val note: String? = null
+)
+
 @Keep
 data class CreateLedgerEntryRequest(
     /** Locally-minted UUID; makes a retried write idempotent server-side. */
@@ -171,6 +178,12 @@ interface KhatabookApiService {
 
     @POST("api/v1/ledger")
     suspend fun createLedgerEntry(@Body body: CreateLedgerEntryRequest): Response<LedgerEntryResponse>
+
+    @PATCH("api/v1/ledger/{id}")
+    suspend fun updateLedgerEntry(
+        @Path("id") id: String,
+        @Body body: UpdateLedgerEntryRequest
+    ): Response<LedgerEntryResponse>
 
     @DELETE("api/v1/ledger/{id}")
     suspend fun deleteLedgerEntry(@Path("id") id: String): Response<Unit>
