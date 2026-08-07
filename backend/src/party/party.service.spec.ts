@@ -4,6 +4,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { PartyService } from './party.service';
 import { Party } from './party.entity';
 import { SmsService } from '../notifications/sms/sms.service';
+import { Business } from '../business/business.entity';
 
 /**
  * Client-supplied primary keys on party create.
@@ -36,6 +37,11 @@ describe('PartyService — client-supplied ids', () => {
       providers: [
         PartyService,
         { provide: SmsService, useValue: { sendSms } },
+        {
+          provide: getRepositoryToken(Business),
+          // Used only to name the business in the welcome SMS.
+          useValue: { findOne: async () => ({ id: BUSINESS_A, name: 'Test Shop' }) },
+        },
         {
           provide: getRepositoryToken(Party),
           useValue: {

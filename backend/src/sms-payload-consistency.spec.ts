@@ -66,7 +66,11 @@ describe('SMS payload consistency across every sender', () => {
             save: jest.fn(async (u: any) => u),
           },
         },
-        { provide: getRepositoryToken(Business), useValue: {} },
+        {
+          provide: getRepositoryToken(Business),
+          // PartyService now resolves the business name for the welcome SMS.
+          useValue: { findOne: async () => ({ id: 'biz-1', name: 'Test Shop' }) },
+        },
         {
           provide: getRepositoryToken(Party),
           useValue: {

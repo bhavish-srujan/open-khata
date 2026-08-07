@@ -14,6 +14,7 @@ import {
 } from 'typeorm';
 import { LedgerEntry } from './ledger-entry.entity';
 import { Party } from '../party/party.entity';
+import { Business } from '../business/business.entity';
 import { CreateLedgerEntryDto } from './dto/create-ledger-entry.dto';
 import { UpdateLedgerEntryDto } from './dto/update-ledger-entry.dto';
 import { BalanceHistory } from './balance-history.entity';
@@ -42,6 +43,24 @@ function balanceDelta(
     return entryType === 'GAVE' ? magnitude : -magnitude;
   }
   return entryType === 'GAVE' ? -magnitude : magnitude;
+}
+
+/**
+ * States a balance from the recipient's point of view.
+ *
+ * The previous message sent `Math.abs(balance)` under the fixed label "Current
+ * Balance", which told a customer holding credit that they owed that amount —
+ * a factual error in a message about money, and one that invites paying twice.
+ */
+function describeBalance(partyType: Party['type'], balance: number): string {
+  const amount = Math.abs(balance);
+  // Below half a paisa is settled; avoids "Rs 0.00 due" from rounding dust.
+  if (amount < 0.005) return 'Your account is now settled.';
+
+  const owesUs = partyType === 'CUSTOMER' ? balance > 0 : balance < 0;
+  return owesUs
+    ? `Balance due: Rs ${amount.toFixed(2)}.`
+    : `You are in credit: Rs ${amount.toFixed(2)}.`;
 }
 
 @Injectable()
@@ -153,9 +172,18 @@ export class LedgerService {
 
       // 6. Send SMS Notification
       if (party.phone) {
+        // The business name, not its id. This previously interpolated the raw
+        // businessId, so customers received "…3f1a9c22-0000-4000-… gave you".
+        const business = await manager.findOne(Business, {
+          where: { id: businessId },
+        });
+        const businessName = business?.name?.trim() || 'Your shop';
+
         const actionText = dto.type === 'GAVE' ? 'gave you' : 'received from you';
-        const message = `Khata Book: Transaction recorded. ${businessId} ${actionText} ₹${dto.amount}. Current Balance: ₹${Math.abs(newBalance)}.`;
-        
+        const message =
+          `Khata Book: ${businessName} ${actionText} Rs ${dto.amount.toFixed(2)}. ` +
+          `${describeBalance(party.type, newBalance)}`;
+
         // Fire and forget (don't block the transaction)
         this.smsService.sendSms(party.phone, message).catch(console.error);
       }

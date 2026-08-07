@@ -327,18 +327,10 @@ class KhatabookRepository(private val context: Context) {
                 )
             )
         )
-        // Trigger SMS Intent for new customer
-        try {
-            val message = "Hi $name, welcome to Khatabook! Your profile has been created."
-            val smsIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("sms:$phone")).apply {
-                putExtra("sms_body", message)
-                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            context.startActivity(smsIntent)
-        } catch (e: Exception) {
-            // Ignore
-        }
-        
+        // No SMS intent here. The server sends the welcome message when the
+        // queued create is delivered, so firing one locally produced two
+        // messages per customer — and launching the SMS composer with
+        // FLAG_ACTIVITY_NEW_TASK threw the user out of the app on every add.
         return newParty
     }
 
@@ -420,26 +412,10 @@ class KhatabookRepository(private val context: Context) {
                 )
             )
         )
-        // Trigger SMS Intent for transaction
-        try {
-            val updatedParty = _parties.value.find { it.id == partyId }
-            if (updatedParty != null && source != EntrySource.OCR) {
-                val sign = if (updatedParty.type == PartyType.CUSTOMER) {
-                    if (type == TransactionType.GAVE) "-" else "+"
-                } else {
-                    if (type == TransactionType.GAVE) "+" else "-"
-                }
-                val message = "Hi, Entry added for Rs $sign${amount.toInt()} on ${java.text.SimpleDateFormat("dd MMM", java.util.Locale.getDefault()).format(java.util.Date())}. Total dues : Rs ${updatedParty.currentBalance.toInt()}. Check history: https://khatabook.com/t/${(1000..9999).random()} Thank you My Business"
-                val smsIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("sms:${updatedParty.phone}")).apply {
-                    putExtra("sms_body", message)
-                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
-                context.startActivity(smsIntent)
-            }
-        } catch (e: Exception) {
-            // Ignore
-        }
-        
+        // No SMS intent here either. The server sends the transaction
+        // message when the queued create is delivered. The local one also
+        // reported "Total dues" without direction and carried a fabricated
+        // khatabook.com history link.
         return newEntry
     }
 

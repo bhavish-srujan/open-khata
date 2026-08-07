@@ -2,6 +2,7 @@ import { ConflictException, Injectable, NotFoundException } from '@nestjs/common
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Party } from './party.entity';
+import { Business } from '../business/business.entity';
 import { CreatePartyDto } from './dto/create-party.dto';
 import { SmsService } from '../notifications/sms/sms.service';
 
@@ -13,6 +14,9 @@ export class PartyService {
   constructor(
     @InjectRepository(Party)
     private readonly partyRepository: Repository<Party>,
+    // Resolvable anywhere: AuthModule is @Global and re-exports TypeOrmModule.
+    @InjectRepository(Business)
+    private readonly businessRepository: Repository<Business>,
     private readonly smsService: SmsService,
   ) {}
 
@@ -63,9 +67,16 @@ export class PartyService {
 
     // Send welcome SMS if phone number is provided
     if (savedParty.phone) {
+      // The business name, not its id. Customers previously received
+      // "…created by 3f1a9c22-0000-4000-8000-000000000001".
+      const business = await this.businessRepository.findOne({
+        where: { id: businessId },
+      });
+      const businessName = business?.name?.trim() || 'your shop';
+
       await this.smsService.sendSms(
         savedParty.phone,
-        `Welcome to Khata Book! Your account has been created by ${businessId}.`,
+        `Welcome to ${businessName}! Your Khata Book account has been created.`,
       );
     }
 
