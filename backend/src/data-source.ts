@@ -8,6 +8,7 @@ import { BalanceHistory } from './ledger/balance-history.entity';
 import { Item } from './inventory/item.entity';
 import { AuditLog } from './audit-logs/audit-log.entity';
 import { Bill } from './bills/entities/bill.entity';
+import { Receipt } from './uploads/receipt.entity';
 
 config(); // Load .env
 
@@ -23,6 +24,6 @@ export const AppDataSource = new DataSource({
   logging: true,
   // Must match app.module.ts exactly, or migration:generate will emit DROP
   // statements for whichever entities are missing here.
-  entities: [User, Party, LedgerEntry, Business, BalanceHistory, Item, AuditLog, Bill],
+  entities: [User, Party, LedgerEntry, Business, BalanceHistory, Item, AuditLog, Bill, Receipt],
   migrations: ['src/migrations/*.ts'],
 });

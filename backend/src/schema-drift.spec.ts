@@ -10,6 +10,7 @@ import { BalanceHistory } from './ledger/balance-history.entity';
 import { Item } from './inventory/item.entity';
 import { AuditLog } from './audit-logs/audit-log.entity';
 import { Bill } from './bills/entities/bill.entity';
+import { Receipt } from './uploads/receipt.entity';
 
 /**
  * Guards the migration set against the entities.
@@ -31,6 +32,7 @@ const ENTITIES = [
   Item,
   AuditLog,
   Bill,
+  Receipt,
 ];
 
 /** Table name and column names exactly as TypeORM will address them. */

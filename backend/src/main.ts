@@ -3,7 +3,6 @@ import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { auditContextMiddleware } from './audit-logs/audit-context';
-import { UPLOADS_ROOT } from './uploads/uploads.config';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
@@ -15,11 +14,10 @@ async function bootstrap() {
   app.enableCors();
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true }));
   
-  // Serve uploaded files statically, from the same constant the upload
-  // controller writes to, so the two cannot drift apart again.
-  app.useStaticAssets(UPLOADS_ROOT, {
-    prefix: '/uploads/',
-  });
+  // No static handler for /uploads/**. Receipts are financial documents and
+  // were previously world-readable to anyone holding a URL; they are now served
+  // only by GET /uploads/receipts/:id, which requires a token and checks that
+  // the receipt belongs to the caller's business.
 
   // Listen on all interfaces so physical devices on the same WiFi can connect
   await app.listen(process.env.PORT ?? 3000, '0.0.0.0');

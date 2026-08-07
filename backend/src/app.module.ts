@@ -27,6 +27,7 @@ import { UploadsModule } from './uploads/uploads.module';
 import { Item } from './inventory/item.entity';
 import { AuditLog } from './audit-logs/audit-log.entity';
 import { Bill } from './bills/entities/bill.entity';
+import { Receipt } from './uploads/receipt.entity';
 import { NotificationsModule } from './notifications/notifications.module';
 
 @Module({
@@ -52,7 +53,7 @@ import { NotificationsModule } from './notifications/notifications.module';
         return {
           type: 'postgres',
           url: databaseUrl || 'postgresql://postgres:password@localhost:5432/khatabook',
-          entities: [User, Party, LedgerEntry, Business, BalanceHistory, Item, AuditLog, Bill],
+          entities: [User, Party, LedgerEntry, Business, BalanceHistory, Item, AuditLog, Bill, Receipt],
           synchronize: configService.get<string>('NODE_ENV') !== 'production', // Use migrations in production
         };
       },
