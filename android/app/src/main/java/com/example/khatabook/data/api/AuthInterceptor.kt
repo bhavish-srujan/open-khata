@@ -8,20 +8,29 @@ import okhttp3.Response
  * The [tokenProvider] lambda is called on each request so it always reads
  * the most up-to-date token (e.g. from EncryptedSharedPreferences).
  *
- * No x-business-id header is sent: the business is carried inside the JWT and
- * the server reads it from there. The header previously sent a hardcoded
- * "biz_1", which is not a real business id and which the server ignored.
+ * Sends the active business as x-business-id when one is selected, so a user
+ * who belongs to several can switch without re-authenticating. This header once
+ * carried a hardcoded "biz_1" that was not a real id at all; it now carries a
+ * server-issued UUID, and the server verifies membership before honouring it.
  */
-class AuthInterceptor(private val tokenProvider: () -> String?) : Interceptor {
+class AuthInterceptor(
+    private val tokenProvider: () -> String?,
+    private val businessIdProvider: () -> String? = { null },
+) : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
-        val token = tokenProvider()
-        val request = if (!token.isNullOrBlank()) {
-            chain.request().newBuilder()
-                .addHeader("Authorization", "Bearer $token")
-                .build()
-        } else {
-            chain.request()
+        val token = tokenProvider() ?: return chain.proceed(chain.request())
+        if (token.isBlank()) return chain.proceed(chain.request())
+
+        val builder = chain.request().newBuilder()
+            .addHeader("Authorization", "Bearer $token")
+
+        // The active business, when it differs from the one the token was
+        // issued for. The server honours this only after checking membership,
+        // so it grants nothing the token does not already allow.
+        businessIdProvider()?.takeIf { it.isNotBlank() }?.let {
+            builder.addHeader("x-business-id", it)
         }
-        return chain.proceed(request)
+
+        return chain.proceed(builder.build())
     }
 }

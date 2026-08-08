@@ -60,11 +60,10 @@ import com.example.khatabook.ui.theme.*
 @Composable
 fun PartiesScreen(
     parties: List<Party>,
-    businesses: List<BusinessAccount> = listOf(
-        BusinessAccount("biz_1", "Shop 1 (Rajesh Kirana)", "Retail Store", true),
-        BusinessAccount("biz_2", "Shop 2 (Electronics)", "Electronics", false)
-    ),
-    selectedBusinessId: String = "biz_1",
+    // No demo default: businesses are real, server-issued records supplied by
+    // the caller. The old default invented two shops that did not exist.
+    businesses: List<BusinessAccount> = emptyList(),
+    selectedBusinessId: String = "",
     profileLocksMap: Map<String, String> = emptyMap(),
     onBusinessSelected: (BusinessAccount) -> Unit = {},
     onAddNewBusinessClick: () -> Unit = {},
@@ -111,7 +110,9 @@ fun PartiesScreen(
         derivedStateOf { searchQuery.isEmpty() && !isKeyboardVisible && !isScrolledFromTop }
     }
 
-    val activeBusiness = businesses.find { it.id == selectedBusinessId } ?: businesses.first()
+    val activeBusiness = businesses.find { it.id == selectedBusinessId }
+        ?: businesses.firstOrNull()
+        ?: BusinessAccount(id = "", name = "My Business")
     val context = LocalContext.current
 
     // Derived state: does the active tab have any parties? (used to hide FAB on empty state)

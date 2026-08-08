@@ -15,7 +15,7 @@ export class BusinessController {
 
   @Get()
   findAll(@Request() req) {
-    return this.businessService.findAllByOwner(req.user.sub);
+    return this.businessService.findAllForUser(req.user.sub);
   }
 
   @Get(':id')

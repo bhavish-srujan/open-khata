@@ -9,6 +9,7 @@ import { LedgerEntry } from '../ledger/ledger-entry.entity';
 import { Bill } from '../bills/entities/bill.entity';
 import { Item } from '../inventory/item.entity';
 import { Receipt } from '../uploads/receipt.entity';
+import { UserRole } from '../users/user.entity';
 
 @Injectable()
 export class BusinessService {
@@ -18,18 +19,46 @@ export class BusinessService {
     private readonly dataSource: DataSource,
   ) {}
 
+  /**
+   * Creates a business and the owner's membership of it.
+   *
+   * Both, together: access is resolved from business_members, so a business
+   * created without one would be invisible to the person who just made it.
+   */
   async create(ownerId: string, name: string, type?: string, gstNumber?: string): Promise<Business> {
-    const business = this.businessRepository.create({
-      ownerId,
-      name,
-      type,
-      gstNumber,
+    return this.dataSource.transaction(async (manager) => {
+      const business = await manager.save(
+        manager.create(Business, { ownerId, name, type, gstNumber }),
+      );
+
+      await manager.save(
+        manager.create(BusinessMember, {
+          businessId: business.id,
+          userId: ownerId,
+          role: UserRole.OWNER,
+        }),
+      );
+
+      return business;
     });
-    return this.businessRepository.save(business);
   }
 
-  async findAllByOwner(ownerId: string): Promise<Business[]> {
-    return this.businessRepository.find({ where: { ownerId } });
+  /**
+   * Every business the user can act in, owned or not.
+   *
+   * Listing by ownerId alone hid businesses someone had been added to as
+   * staff — they could authenticate into one but never see it listed.
+   */
+  async findAllForUser(userId: string): Promise<Business[]> {
+    const memberships = await this.dataSource.getRepository(BusinessMember).find({
+      where: { userId },
+      relations: { business: true },
+      order: { createdAt: 'ASC' },
+    });
+
+    return memberships
+      .map((m) => m.business)
+      .filter((b): b is Business => !!b);
   }
 
   async findOne(id: string, ownerId: string): Promise<Business> {

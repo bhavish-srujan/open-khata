@@ -18,8 +18,15 @@ object NetworkClient {
      */
     private var tokenProvider: () -> String? = { null }
 
-    fun init(tokenProvider: () -> String?) {
+    /** Active business, read per request so a switch takes effect immediately. */
+    private var businessIdProvider: () -> String? = { null }
+
+    fun init(
+        tokenProvider: () -> String?,
+        businessIdProvider: () -> String? = { null },
+    ) {
         NetworkClient.tokenProvider = tokenProvider
+        NetworkClient.businessIdProvider = businessIdProvider
     }
 
     /**
@@ -41,7 +48,7 @@ object NetworkClient {
     // so updating it via init() is reflected in every subsequent request.
     private val okHttpClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
-            .addInterceptor(AuthInterceptor { tokenProvider() })
+            .addInterceptor(AuthInterceptor({ tokenProvider() }, { businessIdProvider() }))
             .addInterceptor(loggingInterceptor)
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)

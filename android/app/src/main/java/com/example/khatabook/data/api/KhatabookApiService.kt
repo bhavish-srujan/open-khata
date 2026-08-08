@@ -88,6 +88,23 @@ data class CreateLedgerEntryRequest(
     val source: String = "MANUAL"
 )
 
+// ─── Business DTOs ───────────────────────────────────────────
+/** A business as the server knows it. `id` is the real UUID everything scopes by. */
+@Keep
+data class BusinessResponse(
+    val id: String,
+    val name: String,
+    val type: String?,
+    val gstNumber: String?,
+    val ownerId: String?
+)
+
+@Keep
+data class CreateBusinessRequest(
+    val name: String,
+    val type: String? = null
+)
+
 // ─── Reports DTOs ────────────────────────────────────────────
 @Keep
 data class CashflowResponse(
@@ -198,6 +215,13 @@ interface KhatabookApiService {
         @Query("from") from: String? = null,
         @Query("to") to: String? = null
     ): Response<List<LedgerFeedEntry>>
+
+    // Businesses
+    @GET("businesses")
+    suspend fun getBusinesses(): Response<List<BusinessResponse>>
+
+    @POST("businesses")
+    suspend fun createBusiness(@Body body: CreateBusinessRequest): Response<BusinessResponse>
 
     // Reports
     @GET("reports/cashflow")

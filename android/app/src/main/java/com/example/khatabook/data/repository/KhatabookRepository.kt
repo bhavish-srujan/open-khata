@@ -1,9 +1,11 @@
 package com.example.khatabook.data.repository
 
 import com.example.khatabook.data.api.CreateLedgerEntryRequest
+import com.example.khatabook.data.api.CreateBusinessRequest
 import com.example.khatabook.data.api.CreatePartyRequest
 import com.example.khatabook.data.api.NetworkClient
 import com.example.khatabook.data.api.UpdateLedgerEntryRequest
+import com.example.khatabook.data.model.BusinessAccount
 import com.example.khatabook.data.model.CollectionFrequency
 import com.example.khatabook.data.model.EntrySource
 import com.example.khatabook.data.model.EntryStatus
@@ -56,6 +58,33 @@ class KhatabookRepository(private val context: Context) {
     private val flushMutex = Mutex()
 
     private var activePhoneNumber: String = ""
+
+    /**
+     * The business every read and write is scoped to.
+     *
+     * Blank until the real list has been fetched. It used to be the invented
+     * string "biz_1", which matched nothing on the server, so the switcher,
+     * the profile locks and the per-business filtering were all operating on a
+     * value the backend had never heard of.
+     */
+    private var activeBusinessId: String = ""
+
+    private val _businesses = MutableStateFlow<List<BusinessAccount>>(emptyList())
+    val businesses: StateFlow<List<BusinessAccount>> = _businesses.asStateFlow()
+
+    private val _activeBusiness = MutableStateFlow<BusinessAccount?>(null)
+    val activeBusiness: StateFlow<BusinessAccount?> = _activeBusiness.asStateFlow()
+
+    /** Read by the HTTP interceptor on every request. */
+    fun currentBusinessId(): String? = activeBusinessId.takeIf { it.isNotBlank() }
+
+    /**
+     * Cache key for the active user *and* business. Data from two businesses
+     * must not share a bucket, or switching would show the other's parties.
+     */
+    private fun dataKey(kind: String): String =
+        if (activeBusinessId.isBlank()) "${kind}_data_$activePhoneNumber"
+        else "${kind}_data_${activePhoneNumber}_$activeBusinessId"
 
     init {
         val savedUrl = getServerUrl()
@@ -209,6 +238,87 @@ class KhatabookRepository(private val context: Context) {
             NetworkClient.apiService.deleteLedgerEntry(op.targetId).code()
     }
 
+    // ─── Businesses ────────────────────────────────────────────────
+
+    /**
+     * Fetches the businesses this user can act in and selects one.
+     *
+     * The list was previously invented on the device — a single hardcoded
+     * "biz_1" — so nothing the switcher did corresponded to a real business.
+     * Returns false when the server cannot be reached, leaving any previously
+     * cached selection in place.
+     */
+    suspend fun loadBusinesses(): Boolean {
+        return try {
+            val response = NetworkClient.apiService.getBusinesses()
+            val body = response.body()
+            if (!response.isSuccessful || body == null) return false
+
+            val mapped = body.mapIndexed { index, b ->
+                BusinessAccount(
+                    id = b.id,
+                    name = b.name,
+                    type = b.type ?: "General Store",
+                    isPrimary = index == 0,
+                )
+            }
+            _businesses.value = mapped
+
+            // Keep the previous selection if it is still one of ours; otherwise
+            // fall back to the remembered one, then to the first.
+            val remembered = prefs.getString("active_business_$activePhoneNumber", null)
+            val chosen = mapped.firstOrNull { it.id == activeBusinessId }
+                ?: mapped.firstOrNull { it.id == remembered }
+                ?: mapped.firstOrNull()
+
+            if (chosen != null && chosen.id != activeBusinessId) {
+                switchBusiness(chosen.id)
+            } else {
+                _activeBusiness.value = chosen
+            }
+            true
+        } catch (_: Exception) { false }
+    }
+
+    /**
+     * Makes another business active.
+     *
+     * Cached data is per business, so this swaps buckets rather than filtering
+     * one shared list: the previous business's parties and entries are written
+     * out first, then the new business's are loaded and refreshed from the
+     * server. Anything queued is flushed beforehand so it is delivered against
+     * the business it was created in.
+     */
+    suspend fun switchBusiness(businessId: String): Boolean {
+        if (businessId.isBlank() || businessId == activeBusinessId) return false
+
+        flushOutbox()
+        saveData()
+
+        activeBusinessId = businessId
+        prefs.edit().putString("active_business_$activePhoneNumber", businessId).apply()
+        _activeBusiness.value = _businesses.value.firstOrNull { it.id == businessId }
+
+        loadData()
+        syncPartiesFromServer()
+        return true
+    }
+
+    /** Creates a business server-side and switches to it. */
+    suspend fun createBusiness(name: String, type: String? = null): BusinessAccount? {
+        return try {
+            val response = NetworkClient.apiService.createBusiness(
+                CreateBusinessRequest(name = name, type = type),
+            )
+            val body = response.body()
+            if (!response.isSuccessful || body == null) return null
+
+            loadBusinesses()
+            switchBusiness(body.id)
+            _businesses.value.firstOrNull { it.id == body.id }
+        } catch (_: Exception) { null }
+    }
+
     // ─── Remote Sync ───────────────────────────────────────────────
 
     /**
@@ -299,7 +409,7 @@ class KhatabookRepository(private val context: Context) {
         loadOutbox()
         if (activePhoneNumber.isBlank()) return
         
-        val partiesJson = prefs.getString("parties_data_$activePhoneNumber", null)
+        val partiesJson = prefs.getString(dataKey("parties"), null)
         if (partiesJson != null) {
             val type = TypeToken.getParameterized(List::class.java, Party::class.java).type
             val savedParties: List<Party> = gson.fromJson(partiesJson, type)
@@ -308,7 +418,7 @@ class KhatabookRepository(private val context: Context) {
             _parties.value = emptyList()
         }
 
-        val entriesJson = prefs.getString("entries_data_$activePhoneNumber", null)
+        val entriesJson = prefs.getString(dataKey("entries"), null)
         if (entriesJson != null) {
             val type = TypeToken.getParameterized(List::class.java, LedgerEntry::class.java).type
             val savedEntries: List<LedgerEntry> = gson.fromJson(entriesJson, type)
@@ -324,8 +434,8 @@ class KhatabookRepository(private val context: Context) {
         val partiesJson = gson.toJson(_parties.value)
         val entriesJson = gson.toJson(_ledgerEntries.value)
         prefs.edit()
-            .putString("parties_data_$activePhoneNumber", partiesJson)
-            .putString("entries_data_$activePhoneNumber", entriesJson)
+            .putString(dataKey("parties"), partiesJson)
+            .putString(dataKey("entries"), entriesJson)
             .apply()
     }
     fun addParty(

@@ -141,14 +141,19 @@ class MainActivity : AppCompatActivity() {
             EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
             EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
         )
-        NetworkClient.init { 
+        NetworkClient.init(
+            tokenProvider = {
             val activePhone = securePrefs.getString("auth_phone", null)
             if (activePhone != null) {
                 securePrefs.getString("jwt_token_$activePhone", securePrefs.getString("jwt_token", null))
             } else {
                 securePrefs.getString("jwt_token", null)
             }
-        }
+            },
+            // The repository owns which business is active; the interceptor
+            // reads it per request so a switch takes effect immediately.
+            businessIdProvider = { repository.currentBusinessId() },
+        )
         setContent {
             MaterialTheme(typography = com.example.khatabook.ui.theme.KhatabookTypography) {
                 Surface(modifier = Modifier.fillMaxSize()) {
@@ -270,18 +275,46 @@ class MainActivity : AppCompatActivity() {
                     var activeBusinessId by remember { mutableStateOf("biz_1") }
                     var showBusinessSwitcher by remember { mutableStateOf(false) }
 
-                    // Profile Lock PIN Map per Business (bizId -> PIN)
-                    val profileLocksMap = remember { mutableStateMapOf<String, String>() }
-
-                    // Multiple Business Accounts
-                    val businesses = remember {
-                        mutableStateListOf(
-                            BusinessAccount("biz_1", getUserPref("business_name", authenticatedPhone, "My Business"), "Retail Store", true)
-                        )
+                    // Profile lock PIN per business, keyed by the real business
+                    // UUID and persisted. It was held in a remember{} keyed by an
+                    // invented id, so every lock was silently lost on process
+                    // death — and keyed to a business that did not exist.
+                    val profileLocksMap = remember(authenticatedPhone) {
+                        val stored = mutableStateMapOf<String, String>()
+                        prefs.getStringSet("profile_locks_$authenticatedPhone", emptySet())
+                            ?.forEach { entry ->
+                                val parts = entry.split(":", limit = 2)
+                                if (parts.size == 2) stored[parts[0]] = parts[1]
+                            }
+                        stored
                     }
-                    var selectedBusinessId by remember { mutableStateOf("biz_1") }
-                    val activeBusiness = remember(businesses, selectedBusinessId) {
-                        businesses.find { it.id == selectedBusinessId } ?: businesses.first()
+
+                    fun persistProfileLocks() {
+                        prefs.edit().putStringSet(
+                            "profile_locks_$authenticatedPhone",
+                            profileLocksMap.map { "${it.key}:${it.value}" }.toSet(),
+                        ).apply()
+                    }
+
+                    // Real businesses, fetched from the server. These were a
+                    // hardcoded "biz_1" that corresponded to nothing, so the
+                    // switcher and every per-business filter keyed off a value
+                    // the backend had never heard of.
+                    val businesses by repository.businesses.collectAsState()
+                    val activeBusinessFromRepo by repository.activeBusiness.collectAsState()
+                    val selectedBusinessId = activeBusinessFromRepo?.id ?: ""
+                    val activeBusiness = activeBusinessFromRepo
+                        ?: BusinessAccount(
+                            id = "",
+                            name = getUserPref("business_name", authenticatedPhone, "My Business"),
+                        )
+
+                    // Load them once the user is known, and again when the
+                    // account changes.
+                    LaunchedEffect(authenticatedPhone) {
+                        if (authenticatedPhone.isNotBlank()) {
+                            repository.loadBusinesses()
+                        }
                     }
 
                     // App language selection (persisted per-user)
@@ -367,8 +400,7 @@ class MainActivity : AppCompatActivity() {
                                             // migration of global values belonging to a different user).
                                             authenticatedPhone = normalizedPhone
                                             userName = getUserPref("user_name", authenticatedPhone, "User")
-                                            val businessName = getUserPref("business_name", authenticatedPhone, "My Business")
-                                            businesses[0] = businesses[0].copy(name = businessName)
+                                            // Business names come from the server now.
 
                                             // Now persist the active auth phone in secure prefs
                                             prefs.edit().putString("auth_phone", normalizedPhone).apply()
@@ -407,9 +439,8 @@ class MainActivity : AppCompatActivity() {
                                             setUserPref("user_name", authenticatedPhone, name)
                                             updateLoginState(true)
                                             if (bizName.isNotBlank()) {
-                                                businesses[0] = businesses[0].copy(name = bizName)
-                                                val b = businesses[0]
-                                                businesses[0] = b.copy(name = bizName)
+                                                // Kept for the pre-login placeholder; the
+                                                // authoritative name is the server's.
                                                 setUserPref("business_name", authenticatedPhone, bizName)
                                             }
                                             navStack.clear()
@@ -425,19 +456,24 @@ class MainActivity : AppCompatActivity() {
                                 }
 
                                 AppScreen.PARTIES -> {
+                                    val partiesScope = rememberCoroutineScope()
                                     PartiesScreen(
                                         parties = parties,
                                         businesses = businesses,
                                         selectedBusinessId = selectedBusinessId,
                                         profileLocksMap = profileLocksMap,
                                         onBusinessSelected = { biz ->
-                                            selectedBusinessId = biz.id
+                                            partiesScope.launch { repository.switchBusiness(biz.id) }
                                         },
                                         onAddNewBusinessClick = {
-                                            val newBizId = "biz_${businesses.size + 1}"
-                                            val newBiz = BusinessAccount(newBizId, "Shop ${businesses.size + 1} (New Store)")
-                                            businesses.add(newBiz)
-                                            selectedBusinessId = newBizId
+                                            // Created server-side so it has a real id and an
+                                            // owner membership; the repository switches to it.
+                                            partiesScope.launch {
+                                                repository.createBusiness(
+                                                    "Shop ${businesses.size + 1}",
+                                                    "Retail Store",
+                                                )
+                                            }
                                         },
                                         onAddPartyClick = { navigateTo(AppScreen.CUSTOMER_CONTACT_PICKER) },
                                         onCashbookClick = { navigateTo(AppScreen.CASHBOOK) },
@@ -638,10 +674,13 @@ class MainActivity : AppCompatActivity() {
                                         isProfileLockEnabled = profileLocksMap.containsKey(selectedBusinessId),
                                         profileLockPin = profileLocksMap[selectedBusinessId] ?: "",
                                         onToggleProfileLock = { enabled, pin ->
-                                            if (enabled && pin != null) {
-                                                profileLocksMap[selectedBusinessId] = pin
-                                            } else {
-                                                profileLocksMap.remove(selectedBusinessId)
+                                            if (selectedBusinessId.isNotBlank()) {
+                                                if (enabled && pin != null) {
+                                                    profileLocksMap[selectedBusinessId] = pin
+                                                } else {
+                                                    profileLocksMap.remove(selectedBusinessId)
+                                                }
+                                                persistProfileLocks()
                                             }
                                         }
                                     )
@@ -724,6 +763,7 @@ class MainActivity : AppCompatActivity() {
                     }
 
                     // Account Switching Overlay state for Instagram-style account switcher
+                    val switcherScope = rememberCoroutineScope()
                     var switchingBusinessTarget by remember { mutableStateOf<BusinessAccount?>(null) }
                     var pendingBusinessLockTarget by remember { mutableStateOf<Pair<BusinessAccount, String>?>(null) }
 
@@ -747,11 +787,10 @@ class MainActivity : AppCompatActivity() {
                             },
                             onCreateNewBusiness = { name ->
                                 showBusinessSwitcher = false
-                                val nextId = businesses.size + 1
-                                val newBizId = "biz_$nextId"
-                                val newBiz = BusinessAccount(newBizId, name, "Retail Store", false)
-                                businesses.add(newBiz)
-                                switchingBusinessTarget = newBiz
+                                switcherScope.launch {
+                                    val created = repository.createBusiness(name, "Retail Store")
+                                    if (created != null) switchingBusinessTarget = created
+                                }
                             },
                             onDismiss = { showBusinessSwitcher = false }
                         )
@@ -779,7 +818,7 @@ class MainActivity : AppCompatActivity() {
                                 val biz = switchingBusinessTarget!!
                                 switchingBusinessTarget = null
                                 activeBusinessId = biz.id
-                                selectedBusinessId = biz.id
+                                switcherScope.launch { repository.switchBusiness(biz.id) }
                             }
                         )
                     }

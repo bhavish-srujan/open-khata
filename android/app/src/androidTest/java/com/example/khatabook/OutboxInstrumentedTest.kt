@@ -51,7 +51,7 @@ class OutboxInstrumentedTest {
         context.getSharedPreferences("khatabook_repository_prefs", 0).edit().clear().commit()
 
         NetworkClient.updateBaseUrl(serverUrl)
-        NetworkClient.init { token }
+        NetworkClient.init({ token })
 
         token = InstrumentationRegistry.getArguments().getString("authToken")
         assertNotNull("pass -e authToken <jwt>", token)

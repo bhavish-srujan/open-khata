@@ -20,6 +20,17 @@ export class JwtAuthGuard implements CanActivate {
     private memberRepository: Repository<BusinessMember>,
   ) {}
 
+  /**
+   * Reads a header value, tolerating the array form Node uses for repeats.
+   * A repeated header is rejected rather than guessed at.
+   */
+  private readHeader(request: any, name: string): string | undefined {
+    const raw = request.headers?.[name];
+    if (Array.isArray(raw)) return undefined;
+    const value = typeof raw === 'string' ? raw.trim() : '';
+    return value.length > 0 ? value : undefined;
+  }
+
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest();
     const authHeader: string | undefined = request.headers['authorization'];
@@ -45,9 +56,19 @@ export class JwtAuthGuard implements CanActivate {
       // token working. Resolving here means a membership change takes effect on
       // the very next request. It costs one indexed lookup on a guard that
       // already queries the user row.
-      if (payload.businessId) {
+      // The active business may be switched per request via x-business-id.
+      //
+      // The token names one business, but a user can belong to several and the
+      // app lets them switch without re-authenticating. The header is safe here
+      // only because membership is verified below — an earlier version accepted
+      // it unverified, which let a caller name any business they liked. It is
+      // now exactly as trustworthy as the token's own claim, and no more.
+      const requestedBusinessId =
+        this.readHeader(request, 'x-business-id') ?? payload.businessId;
+
+      if (requestedBusinessId) {
         const membership = await this.memberRepository.findOneBy({
-          businessId: payload.businessId,
+          businessId: requestedBusinessId,
           userId: payload.sub,
         });
 
@@ -57,6 +78,7 @@ export class JwtAuthGuard implements CanActivate {
           );
         }
 
+        payload.businessId = requestedBusinessId;
         payload.role = membership.role;
       }
 
