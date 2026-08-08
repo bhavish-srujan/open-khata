@@ -21,7 +21,7 @@ const ROOT = path.join(__dirname, '..');
 const LOCAL_URL = 'postgresql://postgres:password@localhost:5432/khatabook';
 const TABLES = [
   'balance_history', 'audit_logs', 'ledger_entries', 'parties',
-  'items', 'bills', 'business_members', 'businesses', 'users',
+  'items', 'bills', 'receipts', 'business_members', 'businesses', 'users',
 ];
 
 function hostedUrl() {
@@ -38,6 +38,16 @@ async function boot(databaseUrl, nodeEnv) {
   process.env.DATABASE_URL = databaseUrl;
   process.env.NODE_ENV = nodeEnv;
   process.env.SMS_GATEWAY_URL = '';
+  // Point the real S3 driver at MinIO, so uploads exercise object storage
+  // rather than the local-disk fallback.
+  if (process.env.SMOKE_S3 !== '0') {
+    process.env.S3_BUCKET = process.env.S3_BUCKET || 'khatabook-receipts';
+    process.env.S3_ENDPOINT = process.env.S3_ENDPOINT || 'http://127.0.0.1:9000';
+    process.env.S3_REGION = 'us-east-1';
+    process.env.S3_FORCE_PATH_STYLE = 'true';
+    process.env.S3_ACCESS_KEY_ID = process.env.S3_ACCESS_KEY_ID || 'minioadmin';
+    process.env.S3_SECRET_ACCESS_KEY = process.env.S3_SECRET_ACCESS_KEY || 'minioadmin';
+  }
   delete process.env.REMINDERS_ENABLED;
 
   for (const k of Object.keys(require.cache)) delete require.cache[k];
@@ -232,6 +242,44 @@ async function localPass(request) {
   record('removing a member keeps their user account', survivor[0].n === 1,
     survivor[0].n + ' user rows');
 
+
+  // ── uploads via object storage ──────────────────────────────────────
+  const pngBytes = Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    Buffer.from('smoke-receipt-body'),
+  ]);
+
+  r = await auth(request(http).post('/uploads/receipt'))
+    .attach('file', pngBytes, 'receipt.png');
+  record('POST /uploads/receipt stores to object storage', r.status === 201,
+    'status ' + r.status);
+  const receiptId = r.body && r.body.id;
+
+  r = await auth(request(http).get('/uploads/receipts/' + receiptId)).redirects(0);
+  record('GET receipt redirects to a signed URL', r.status === 302,
+    'status ' + r.status);
+
+  if (r.status === 302) {
+    const fetched = await fetch(r.headers.location);
+    const body = Buffer.from(await fetched.arrayBuffer());
+    record('the signed URL returns the exact bytes', body.equals(pngBytes),
+      body.length + ' bytes');
+  } else {
+    record('the signed URL returns the exact bytes', false, 'no redirect');
+  }
+
+  // HTML disguised as a PNG must be refused on content, not on file name.
+  r = await auth(request(http).post('/uploads/receipt'))
+    .attach('file', Buffer.from('<html><script>alert(1)</script></html>'), 'evil.png');
+  record('upload refuses HTML disguised as a PNG', r.status === 400,
+    'status ' + r.status);
+
+  // ── business delete ─────────────────────────────────────────────────
+  // Seven tables reference businesses ON DELETE NO ACTION, so this returned
+  // 500 for any business that had ever been used.
+  r = await auth(request(http).delete('/businesses/' + business.id));
+  record('DELETE /businesses/:id refuses while data exists',
+    r.status === 409, 'status ' + r.status);
 
   const audits = await db.query(
     'SELECT count(*)::int n FROM audit_logs WHERE "entityName" = \'LedgerEntry\'');

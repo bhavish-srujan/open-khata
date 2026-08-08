@@ -1,29 +1,50 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { existsSync } from 'fs';
-import { join } from 'path';
+import { randomUUID } from 'node:crypto';
 import { Receipt } from './receipt.entity';
-import { RECEIPTS_DIR } from './uploads.config';
+import { StorageService } from '../storage/storage.interface';
+import { detectMime, extensionFor } from './file-type';
 
-/** Per-business ceiling, so one tenant cannot exhaust the shared disk. */
+/** Per-business ceiling, so one tenant cannot exhaust shared storage. */
 const MAX_RECEIPTS_PER_BUSINESS = 2000;
+
+/** How long a download link stays valid. Long enough to fetch, short enough
+ *  that a leaked URL is of little use. */
+export const DOWNLOAD_URL_TTL_SECONDS = 120;
 
 @Injectable()
 export class UploadsService {
   constructor(
     @InjectRepository(Receipt)
     private readonly receiptRepository: Repository<Receipt>,
+    private readonly storage: StorageService,
   ) {}
 
   /**
-   * Records ownership for a freshly stored file.
+   * Storage key for a receipt.
    *
-   * Enforces a per-business ceiling. The size limit alone bounds one request,
-   * not the total: with local disk and no quota, a single business could fill
-   * the volume and take the service down for everyone.
+   * Namespaced by business so a key cannot be guessed across tenants and an
+   * operator can see at a glance which objects belong to whom. Always generated
+   * here — the client never supplies any part of a path.
    */
-  async record(
+  private buildKey(businessId: string, extension: string): string {
+    return `receipts/${businessId}/${randomUUID()}${extension}`;
+  }
+
+  /**
+   * Stores an uploaded file and records who owns it.
+   *
+   * The declared Content-Type is ignored in favour of the actual leading bytes:
+   * the client controls the former, and the extension filter alone allowed any
+   * content through under an accepted name.
+   */
+  async store(
     file: Express.Multer.File,
     businessId: string,
     uploadedBy: string,
@@ -35,29 +56,35 @@ export class UploadsService {
       );
     }
 
-    const receipt = this.receiptRepository.create({
-      businessId,
-      uploadedBy,
-      filename: file.filename,
-      mimeType: file.mimetype,
-      sizeBytes: file.size,
-    });
-    return this.receiptRepository.save(receipt);
+    const detected = detectMime(file.buffer);
+    if (!detected) {
+      throw new BadRequestException(
+        'File contents are not a JPEG, PNG or PDF, whatever the file name says.',
+      );
+    }
+
+    const key = this.buildKey(businessId, extensionFor(detected));
+    const stored = await this.storage.put(key, file.buffer, detected);
+
+    return this.receiptRepository.save(
+      this.receiptRepository.create({
+        businessId,
+        uploadedBy,
+        filename: key,
+        mimeType: detected,
+        sizeBytes: stored.size,
+      }),
+    );
   }
 
   /**
-   * Resolves a receipt to an absolute path, but only for the business that owns
-   * it.
+   * Resolves a receipt for the business that owns it.
    *
    * A receipt belonging to another business is reported as not found rather
-   * than forbidden. 403 would confirm that the id exists, turning this endpoint
-   * into an existence oracle across tenants; the caller cannot distinguish
-   * "never existed" from "not yours", which is the intent.
+   * than forbidden: 403 would confirm the id exists, turning this into a
+   * cross-tenant existence oracle.
    */
-  async resolveOwnedFile(
-    id: string,
-    businessId: string,
-  ): Promise<{ receipt: Receipt; absolutePath: string }> {
+  async findOwned(id: string, businessId: string): Promise<Receipt> {
     const receipt = await this.receiptRepository.findOne({
       where: { id, businessId },
     });
@@ -66,16 +93,30 @@ export class UploadsService {
       throw new NotFoundException('Receipt not found');
     }
 
-    // filename is generated server-side by multer and never accepted from the
-    // client, so this join cannot escape RECEIPTS_DIR.
-    const absolutePath = join(RECEIPTS_DIR, receipt.filename);
+    return receipt;
+  }
 
-    if (!existsSync(absolutePath)) {
-      // The row outlived the file. Expected on ephemeral hosting, where a
-      // redeploy wipes the disk but leaves the database intact.
+  /**
+   * A short-lived direct download link, minted only after ownership is checked.
+   *
+   * Null when the driver cannot sign (local disk), telling the caller to stream
+   * the bytes through the API instead.
+   */
+  async getDownloadUrl(id: string, businessId: string): Promise<string | null> {
+    const receipt = await this.findOwned(id, businessId);
+
+    if (!(await this.storage.exists(receipt.filename))) {
+      // The row outlived the object. Expected for anything uploaded before
+      // object storage, when a redeploy wiped the container disk.
       throw new NotFoundException('Receipt file is no longer available');
     }
 
-    return { receipt, absolutePath };
+    return this.storage.getSignedUrl(receipt.filename, DOWNLOAD_URL_TTL_SECONDS);
+  }
+
+  /** Bytes for the streaming fallback, ownership already established. */
+  async readOwned(id: string, businessId: string): Promise<{ receipt: Receipt; body: Buffer }> {
+    const receipt = await this.findOwned(id, businessId);
+    return { receipt, body: await this.storage.get(receipt.filename) };
   }
 }

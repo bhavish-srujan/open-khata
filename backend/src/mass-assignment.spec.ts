@@ -1,5 +1,6 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
+import { DataSource } from 'typeorm';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { BusinessController } from './business/business.controller';
@@ -56,6 +57,15 @@ describe('mass assignment is not possible', () => {
       controllers: [BusinessController, InventoryController],
       providers: [
         BusinessService,
+        {
+          // BusinessService.delete counts dependents and removes memberships
+          // transactionally; unused by these tests but needed to construct it.
+          provide: DataSource,
+          useValue: {
+            getRepository: () => ({ count: async () => 0 }),
+            transaction: async (cb: any) => cb({ delete: async () => undefined, remove: async () => undefined }),
+          },
+        },
         InventoryService,
         {
           provide: getRepositoryToken(Business),

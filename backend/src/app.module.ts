@@ -29,6 +29,7 @@ import { Bill } from './bills/entities/bill.entity';
 import { Receipt } from './uploads/receipt.entity';
 import { BusinessMember } from './business/business-member.entity';
 import { NotificationsModule } from './notifications/notifications.module';
+import { StorageModule } from './storage/storage.module';
 
 @Module({
   imports: [
@@ -74,6 +75,7 @@ import { NotificationsModule } from './notifications/notifications.module';
     AuditLogsModule,
     UploadsModule,
     NotificationsModule,
+    StorageModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

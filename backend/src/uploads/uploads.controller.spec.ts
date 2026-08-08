@@ -1,32 +1,31 @@
 import { INestApplication } from '@nestjs/common';
 import { JwtModule, JwtService } from '@nestjs/jwt';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { BusinessMember } from '../business/business-member.entity';
 import { Test, TestingModule } from '@nestjs/testing';
 import request from 'supertest';
-import { mkdirSync, writeFileSync, rmSync } from 'fs';
-import { join, sep } from 'path';
 import { UploadsController } from './uploads.controller';
 import { UploadsService } from './uploads.service';
 import { Receipt } from './receipt.entity';
-import { RECEIPTS_DIR, UPLOADS_ROOT } from './uploads.config';
+import { StorageService } from '../storage/storage.interface';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { User } from '../users/user.entity';
+import { BusinessMember } from '../business/business-member.entity';
 
 /**
  * Receipts are financial documents.
  *
- * Two faults existed. The upload endpoint had no guard at all, so anyone able
- * to reach the port could write files to disk. And the files were exposed by an
- * unauthenticated static handler on /uploads/**, so any URL holder could read
- * another business's documents — the guard on the write path did nothing for
- * the read path.
+ * Three faults existed. The upload endpoint had no guard, so anyone reaching
+ * the port could write files. The files were separately exposed by an
+ * unauthenticated static handler, so any URL holder could read another
+ * business's documents. And they were written to a container filesystem that a
+ * redeploy destroys.
  *
- * Uses the real JwtAuthGuard so the token checks are genuinely exercised; only
- * the repositories are stubbed.
+ * Uses the real JwtAuthGuard so token checks are genuinely exercised; the
+ * repositories and the storage driver are stubbed. The driver itself is
+ * verified against a real S3 API in s3-storage.integration.spec.ts.
  */
 describe('UploadsController', () => {
-  let membershipRole: any = 'OWNER';
+  const membershipRole: any = 'OWNER';
   let app: INestApplication;
   let jwt: JwtService;
 
@@ -38,72 +37,72 @@ describe('UploadsController', () => {
   const ORPHAN_ID = '33333333-3333-4333-8333-333333333333';
   const MISSING_ID = '44444444-4444-4444-8444-444444444444';
 
-  const OWNED_FILE = 'receipt-test-owned.png';
-  const ORPHAN_FILE = 'receipt-test-orphan.png';
-  const FILE_BODY = 'pretend-png-bytes';
+  const OWNED_KEY = `receipts/${BUSINESS_A}/owned.png`;
+  const ORPHAN_KEY = `receipts/${BUSINESS_A}/orphan.png`;
+  const FILE_BODY = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+  const SIGNED_URL = 'https://bucket.example/signed?sig=abc';
 
-  // Rows the stubbed repository serves.
-  /** Rows the quota check believes the business already holds. */
+  let receipts: Receipt[];
   let receiptCount = 0;
+  let objects: Record<string, Buffer>;
+  /** null mimics the local-disk driver, which cannot sign. */
+  let signedUrl: string | null = SIGNED_URL;
+  let putCalls: { key: string; contentType: string }[];
 
-  const receipts: Receipt[] = [
-    Object.assign(new Receipt(), {
-      id: OWNED_ID,
-      businessId: BUSINESS_A,
-      uploadedBy: dbUser.id,
-      filename: OWNED_FILE,
-      mimeType: 'image/png',
-      sizeBytes: FILE_BODY.length,
-    }),
-    // Row exists, but the file is gone — the ephemeral-disk case.
-    Object.assign(new Receipt(), {
-      id: ORPHAN_ID,
-      businessId: BUSINESS_A,
-      uploadedBy: dbUser.id,
-      filename: ORPHAN_FILE,
-      mimeType: 'image/png',
-      sizeBytes: 10,
-    }),
-  ];
+  const png = (extra = 'body') =>
+    Buffer.concat([
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      Buffer.from(extra),
+    ]);
 
-  beforeAll(async () => {
-    mkdirSync(RECEIPTS_DIR, { recursive: true });
-    writeFileSync(join(RECEIPTS_DIR, OWNED_FILE), FILE_BODY);
+  beforeEach(async () => {
+    receiptCount = 0;
+    signedUrl = SIGNED_URL;
+    putCalls = [];
+    objects = { [OWNED_KEY]: FILE_BODY };
+
+    receipts = [
+      Object.assign(new Receipt(), {
+        id: OWNED_ID, businessId: BUSINESS_A, uploadedBy: dbUser.id,
+        filename: OWNED_KEY, mimeType: 'image/png', sizeBytes: FILE_BODY.length,
+      }),
+      // Row exists, object does not: anything uploaded before object storage.
+      Object.assign(new Receipt(), {
+        id: ORPHAN_ID, businessId: BUSINESS_A, uploadedBy: dbUser.id,
+        filename: ORPHAN_KEY, mimeType: 'image/png', sizeBytes: 10,
+      }),
+    ];
 
     const moduleRef: TestingModule = await Test.createTestingModule({
       imports: [JwtModule.register({ secret: 'test-secret' })],
       controllers: [UploadsController],
       providers: [
+        UploadsService,
         {
-          // JwtAuthGuard and AuthService both resolve the caller's role from
-          // their membership now, so every spec constructing them needs one.
-          provide: getRepositoryToken(BusinessMember),
+          provide: StorageService,
           useValue: {
-            findOneBy: jest.fn(async () => ({ id: 'm-1', role: membershipRole })),
-            find: jest.fn(async () => [
-              { id: 'm-1', businessId: 'biz-1', role: membershipRole },
-            ]),
-            create: (o: any) => o,
-            save: jest.fn(async (m: any) => m),
+            put: jest.fn(async (key: string, body: Buffer, contentType: string) => {
+              putCalls.push({ key, contentType });
+              objects[key] = body;
+              return { key, size: body.length, contentType };
+            }),
+            get: jest.fn(async (key: string) => objects[key]),
+            exists: jest.fn(async (key: string) => key in objects),
+            getSignedUrl: jest.fn(async () => signedUrl),
+            delete: jest.fn(async () => undefined),
           },
         },
-        UploadsService,
         {
           provide: getRepositoryToken(Receipt),
           useValue: {
             create: (o: any) => Object.assign(new Receipt(), o),
-            // Backs the per-business quota check.
             count: jest.fn(async () => receiptCount),
             save: jest.fn(async (r: any) => ({ ...r, id: 'new-receipt-id' })),
-            // Models a real repository: matches on whichever keys the query
-            // actually carries. Hardcoding id AND businessId here would make
-            // the cross-business tests pass even if the service stopped
-            // scoping, since the absent key would simply never match.
+            // Matches on whichever keys the query carries, like a real
+            // repository: hardcoding them would let an unscoped query pass.
             findOne: jest.fn(async ({ where }: any) =>
               receipts.find((r) =>
-                Object.entries(where).every(
-                  ([key, value]) => (r as any)[key] === value,
-                ),
+                Object.entries(where).every(([k, v]) => (r as any)[k] === v),
               ) ?? null,
             ),
           },
@@ -114,6 +113,12 @@ describe('UploadsController', () => {
             findOneBy: jest.fn(async ({ id }) => (id === dbUser.id ? dbUser : null)),
           },
         },
+        {
+          provide: getRepositoryToken(BusinessMember),
+          useValue: {
+            findOneBy: jest.fn(async () => ({ id: 'm-1', role: membershipRole })),
+          },
+        },
       ],
     }).compile();
 
@@ -122,33 +127,24 @@ describe('UploadsController', () => {
     await app.init();
   });
 
-  afterAll(async () => {
+  afterEach(async () => {
     await app.close();
-    rmSync(join(RECEIPTS_DIR, OWNED_FILE), { force: true });
   });
 
   const token = (businessId: string, over: Record<string, any> = {}) =>
     jwt.sign({
-      sub: dbUser.id,
-      businessId,
-      role: 'OWNER',
-      sessionVersion: dbUser.sessionVersion,
-      ...over,
+      sub: dbUser.id, businessId, role: 'OWNER',
+      sessionVersion: dbUser.sessionVersion, ...over,
     });
 
-  // ── unauthorized access ────────────────────────────────────────────────
   describe('unauthorized access', () => {
     it('refuses a read with no token', async () => {
-      await request(app.getHttpServer())
-        .get(`/uploads/receipts/${OWNED_ID}`)
-        .expect(401);
+      await request(app.getHttpServer()).get(`/uploads/receipts/${OWNED_ID}`).expect(401);
     });
 
     it('refuses a read with a token signed by the wrong secret', async () => {
       const forged = new JwtService({ secret: 'not-the-secret' }).sign({
-        sub: dbUser.id,
-        businessId: BUSINESS_A,
-        sessionVersion: dbUser.sessionVersion,
+        sub: dbUser.id, businessId: BUSINESS_A, sessionVersion: dbUser.sessionVersion,
       });
 
       await request(app.getHttpServer())
@@ -167,12 +163,11 @@ describe('UploadsController', () => {
     it('refuses an upload with no token', async () => {
       await request(app.getHttpServer())
         .post('/uploads/receipt')
-        .attach('file', Buffer.from('x'), 'receipt.png')
+        .attach('file', png(), 'receipt.png')
         .expect(401);
     });
   });
 
-  // ── cross-business access ──────────────────────────────────────────────
   describe('cross-business access', () => {
     it('does not serve a receipt belonging to another business', async () => {
       await request(app.getHttpServer())
@@ -185,13 +180,11 @@ describe('UploadsController', () => {
       const foreign = await request(app.getHttpServer())
         .get(`/uploads/receipts/${OWNED_ID}`)
         .set('Authorization', `Bearer ${token(BUSINESS_B)}`);
-
       const absent = await request(app.getHttpServer())
         .get(`/uploads/receipts/${MISSING_ID}`)
         .set('Authorization', `Bearer ${token(BUSINESS_B)}`);
 
-      // 403 here would confirm the id exists, making this an existence oracle
-      // across tenants. The two responses must be indistinguishable.
+      // 403 would confirm the id exists, making this a cross-tenant oracle.
       expect(foreign.status).toBe(absent.status);
       expect(foreign.body.message).toBe(absent.body.message);
     });
@@ -204,47 +197,71 @@ describe('UploadsController', () => {
         .get(`/uploads/receipts/${OWNED_ID}`)
         .set('Authorization', `Bearer ${token(BUSINESS_B)}`);
 
-      // The filter must be in the query, not applied after the fact.
       expect(repo.findOne).toHaveBeenCalledWith({
         where: { id: OWNED_ID, businessId: BUSINESS_B },
       });
     });
 
-    it('leaks no file content to the other business', async () => {
+    it("never mints a signed URL for another business's receipt", async () => {
+      const storage = app.get(StorageService) as any;
+
       const res = await request(app.getHttpServer())
         .get(`/uploads/receipts/${OWNED_ID}`)
         .set('Authorization', `Bearer ${token(BUSINESS_B)}`);
 
-      expect(res.text ?? '').not.toContain(FILE_BODY);
+      expect(res.status).toBe(404);
+      // The signature must be minted only after ownership is established.
+      expect(storage.getSignedUrl).not.toHaveBeenCalled();
+    });
+
+    it("stores each business's objects under its own key prefix", async () => {
+      await request(app.getHttpServer())
+        .post('/uploads/receipt')
+        .set('Authorization', `Bearer ${token(BUSINESS_A)}`)
+        .attach('file', png(), 'a.png')
+        .expect(201);
+
+      expect(putCalls[0].key.startsWith(`receipts/${BUSINESS_A}/`)).toBe(true);
     });
   });
 
-  // ── valid owner access ─────────────────────────────────────────────────
   describe('valid owner access', () => {
-    it('serves the receipt to the owning business', async () => {
+    it('redirects to a short-lived signed URL', async () => {
       const res = await request(app.getHttpServer())
         .get(`/uploads/receipts/${OWNED_ID}`)
         .set('Authorization', `Bearer ${token(BUSINESS_A)}`)
-        // image/png is not a text type, so ask superagent for the raw bytes.
+        .redirects(0);
+
+      expect(res.status).toBe(302);
+      expect(res.headers.location).toBe(SIGNED_URL);
+    });
+
+    it('streams the bytes when the driver cannot sign', async () => {
+      signedUrl = null; // local disk
+
+      const res = await request(app.getHttpServer())
+        .get(`/uploads/receipts/${OWNED_ID}`)
+        .set('Authorization', `Bearer ${token(BUSINESS_A)}`)
         .responseType('blob')
         .expect(200);
 
-      expect(res.headers['content-type']).toContain('image/png');
-      expect(Buffer.from(res.body).toString()).toBe(FILE_BODY);
+      expect(Buffer.from(res.body).equals(FILE_BODY)).toBe(true);
+      // Never inline: content that sniffs as HTML must not run in this origin.
+      expect(res.headers['content-disposition']).toContain('attachment');
+      expect(res.headers['x-content-type-options']).toBe('nosniff');
     });
 
     it('marks the response private so shared caches do not retain it', async () => {
       const res = await request(app.getHttpServer())
         .get(`/uploads/receipts/${OWNED_ID}`)
         .set('Authorization', `Bearer ${token(BUSINESS_A)}`)
-        .expect(200);
+        .redirects(0);
 
       expect(res.headers['cache-control']).toContain('no-store');
       expect(res.headers['cache-control']).toContain('private');
     });
   });
 
-  // ── nonexistent receipts ───────────────────────────────────────────────
   describe('nonexistent receipts', () => {
     it('404s for an id that does not exist', async () => {
       await request(app.getHttpServer())
@@ -253,9 +270,7 @@ describe('UploadsController', () => {
         .expect(404);
     });
 
-    it('404s when the row survives but the file is gone', async () => {
-      // Happens on ephemeral hosting: a redeploy wipes the disk, the database
-      // keeps the row.
+    it('404s when the row survives but the object is gone', async () => {
       await request(app.getHttpServer())
         .get(`/uploads/receipts/${ORPHAN_ID}`)
         .set('Authorization', `Bearer ${token(BUSINESS_A)}`)
@@ -265,8 +280,8 @@ describe('UploadsController', () => {
     it.each([
       ['not a uuid', 'some-filename.png'],
       ['traversal attempt', '..%2F..%2F..%2Fetc%2Fpasswd'],
-      ['on-disk filename', OWNED_FILE],
-    ])('rejects %s with 400 rather than touching the filesystem', async (_label, id) => {
+      ['a storage key', 'receipts%2Fx%2Fy.png'],
+    ])('rejects %s with 400 before any lookup', async (_label, id) => {
       await request(app.getHttpServer())
         .get(`/uploads/receipts/${id}`)
         .set('Authorization', `Bearer ${token(BUSINESS_A)}`)
@@ -274,26 +289,12 @@ describe('UploadsController', () => {
     });
   });
 
-  // ── the static handler is gone ─────────────────────────────────────────
-  describe('the unauthenticated static route no longer exists', () => {
-    it.each([
-      `/uploads/receipts/${OWNED_FILE}`,
-      `/uploads/${OWNED_FILE}`,
-    ])('does not serve %s', async (path) => {
-      const res = await request(app.getHttpServer()).get(path);
-
-      expect(res.status).not.toBe(200);
-      expect(res.text ?? '').not.toContain(FILE_BODY);
-    });
-  });
-
-  // ── upload records ownership ───────────────────────────────────────────
   describe('upload', () => {
-    it('records the receipt against the caller\'s business and returns its id', async () => {
+    it("records the receipt against the caller's business", async () => {
       const res = await request(app.getHttpServer())
         .post('/uploads/receipt')
         .set('Authorization', `Bearer ${token(BUSINESS_A)}`)
-        .attach('file', Buffer.from(FILE_BODY), 'receipt.png')
+        .attach('file', png(), 'receipt.png')
         .expect(201);
 
       expect(res.body.url).toBe('/uploads/receipts/new-receipt-id');
@@ -302,43 +303,59 @@ describe('UploadsController', () => {
       expect(repo.save).toHaveBeenCalledWith(
         expect.objectContaining({ businessId: BUSINESS_A, uploadedBy: dbUser.id }),
       );
-
-      // Clean up whatever multer wrote.
-      const saved = repo.save.mock.calls.at(-1)[0];
-      rmSync(join(RECEIPTS_DIR, saved.filename), { force: true });
     });
 
-    it('refuses an upload once the business hits its receipt ceiling', async () => {
-      receiptCount = 2000;
-
+    it('trusts the bytes, not the declared content type', async () => {
+      // HTML masquerading as a PNG: the extension filter alone allowed this.
       const res = await request(app.getHttpServer())
         .post('/uploads/receipt')
         .set('Authorization', `Bearer ${token(BUSINESS_A)}`)
-        .attach('file', Buffer.from(FILE_BODY), 'receipt.png');
+        .attach('file', Buffer.from('<html><script>alert(1)</script></html>'), {
+          filename: 'evil.png',
+          contentType: 'image/png',
+        });
 
-      // Without a quota one tenant can fill the shared disk for everyone.
-      expect(res.status).toBe(403);
-      receiptCount = 0;
+      expect(res.status).toBe(400);
     });
 
-    it('still rejects a disallowed file type', async () => {
+    it.each([
+      ['jpeg', Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2]), 'image/jpeg'],
+      ['pdf', Buffer.from('%PDF-1.7\nbody'), 'application/pdf'],
+    ])('accepts a real %s and records its true type', async (_label, body, mime) => {
       await request(app.getHttpServer())
         .post('/uploads/receipt')
         .set('Authorization', `Bearer ${token(BUSINESS_A)}`)
-        .attach('file', Buffer.from('#!/bin/sh'), 'payload.sh')
+        .attach('file', body, 'file.bin')
+        .expect(201);
+
+      expect(putCalls.at(-1)!.contentType).toBe(mime);
+    });
+
+    it('names the object from the detected type, not the uploaded name', async () => {
+      await request(app.getHttpServer())
+        .post('/uploads/receipt')
+        .set('Authorization', `Bearer ${token(BUSINESS_A)}`)
+        .attach('file', Buffer.from('%PDF-1.7'), 'invoice.png.exe')
+        .expect(201);
+
+      expect(putCalls.at(-1)!.key.endsWith('.pdf')).toBe(true);
+    });
+
+    it('refuses an upload once the business hits its ceiling', async () => {
+      receiptCount = 2000;
+
+      await request(app.getHttpServer())
+        .post('/uploads/receipt')
+        .set('Authorization', `Bearer ${token(BUSINESS_A)}`)
+        .attach('file', png(), 'receipt.png')
+        .expect(403);
+    });
+
+    it('rejects an authenticated request with no file', async () => {
+      await request(app.getHttpServer())
+        .post('/uploads/receipt')
+        .set('Authorization', `Bearer ${token(BUSINESS_A)}`)
         .expect(400);
-    });
-  });
-
-  // ── write and serve paths still agree ──────────────────────────────────
-  describe('upload directory', () => {
-    it('writes receipts underneath the directory that is served', () => {
-      expect(RECEIPTS_DIR.startsWith(UPLOADS_ROOT)).toBe(true);
-    });
-
-    it('resolves the served root from the working directory, not dist', () => {
-      expect(UPLOADS_ROOT).toBe(join(process.cwd(), 'uploads'));
-      expect(UPLOADS_ROOT).not.toContain(`${sep}dist${sep}`);
     });
   });
 });

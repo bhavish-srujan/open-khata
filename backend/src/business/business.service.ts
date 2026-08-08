@@ -1,14 +1,21 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { Business } from './business.entity';
 import { UpdateBusinessDto } from './dto/business.dto';
+import { BusinessMember } from './business-member.entity';
+import { Party } from '../party/party.entity';
+import { LedgerEntry } from '../ledger/ledger-entry.entity';
+import { Bill } from '../bills/entities/bill.entity';
+import { Item } from '../inventory/item.entity';
+import { Receipt } from '../uploads/receipt.entity';
 
 @Injectable()
 export class BusinessService {
   constructor(
     @InjectRepository(Business)
     private businessRepository: Repository<Business>,
+    private readonly dataSource: DataSource,
   ) {}
 
   async create(ownerId: string, name: string, type?: string, gstNumber?: string): Promise<Business> {
@@ -55,8 +62,43 @@ export class BusinessService {
     return this.businessRepository.save(business);
   }
 
+  /**
+   * Deletes a business, but only an empty one.
+   *
+   * Seven tables reference businesses with ON DELETE NO ACTION, so this
+   * previously returned 500 for any business that had ever been used — the
+   * third instance of that fault after ledger entries and parties.
+   *
+   * Refusing is the fix rather than cascading: a business holds the entire
+   * bookkeeping history of a shop, and silently destroying every party, entry,
+   * bill and receipt because someone tapped delete is not a recoverable
+   * mistake. The caller must clear the data deliberately first.
+   */
   async delete(id: string, ownerId: string): Promise<void> {
     const business = await this.findOne(id, ownerId);
-    await this.businessRepository.remove(business);
+
+    const [parties, entries, bills, items, receipts] = await Promise.all([
+      this.dataSource.getRepository(Party).count({ where: { businessId: id } }),
+      this.dataSource.getRepository(LedgerEntry).count({ where: { businessId: id } }),
+      this.dataSource.getRepository(Bill).count({ where: { businessId: id } }),
+      this.dataSource.getRepository(Item).count({ where: { businessId: id } }),
+      this.dataSource.getRepository(Receipt).count({ where: { businessId: id } }),
+    ]);
+
+    const held = parties + entries + bills + items + receipts;
+    if (held > 0) {
+      throw new ConflictException(
+        `This business still holds ${held} record(s) — ${parties} parties, ` +
+          `${entries} ledger entries, ${bills} bills, ${items} items, ` +
+          `${receipts} receipts. Remove them before deleting the business.`,
+      );
+    }
+
+    await this.dataSource.transaction(async (manager) => {
+      // Memberships are bookkeeping for access, not business data, so they go
+      // with the business rather than blocking its removal.
+      await manager.delete(BusinessMember, { businessId: id });
+      await manager.remove(business);
+    });
   }
 }
