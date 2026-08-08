@@ -185,6 +185,13 @@ export class AuthService {
           throw new BadRequestException(
             'That number is not reachable on WhatsApp. Check it and try again.',
           );
+        case 'recipient_not_allowed':
+          // A sandbox number that has not been added to the allowed recipient
+          // list. A configuration problem, not something the caller can fix.
+          throw new HttpException(
+            'Login is temporarily unavailable. Please try again later.',
+            HttpStatus.SERVICE_UNAVAILABLE,
+          );
         case 'rate_limited':
           throw new HttpException(
             'Too many messages right now. Please try again shortly.',

@@ -104,6 +104,8 @@ describe('WhatsAppService', () => {
       ['rate limited', graphError(429), 'rate_limited'],
       ['throughput cap', graphError(400, 80007), 'rate_limited'],
       ['not a whatsapp user', graphError(400, 131026), 'invalid_number'],
+      // Observed against a real sandbox number before any recipient was added.
+      ['recipient not in allowed list', graphError(400, 131030), 'recipient_not_allowed'],
       ['something else', graphError(500), 'unknown'],
     ])('maps %s', async (_label, error, expected) => {
       mockedAxios.post.mockRejectedValue(error);

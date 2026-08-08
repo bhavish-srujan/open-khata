@@ -8,6 +8,7 @@ const GRAPH_VERSION = 'v21.0';
 /** Why a send failed, so callers can react without parsing Graph errors. */
 export type WhatsAppFailure =
   | 'not_configured'
+  | 'recipient_not_allowed'
   | 'invalid_number'
   | 'template_rejected'
   | 'rate_limited'
@@ -68,6 +69,11 @@ export class WhatsAppService {
     if (typeof code === 'number' && code >= 132000 && code < 133000) {
       return 'template_rejected';
     }
+    // Test numbers may only message recipients registered in the dashboard.
+    // Seen in practice as the first failure on a fresh sandbox setup.
+    if (code === 131030) return 'recipient_not_allowed';
+    if (code === 131031) return 'auth_failed';
+
     if (code === 131026 || code === 131047 || subcode === 2494010) {
       // Undeliverable: not a WhatsApp user, or outside the allowed window.
       return 'invalid_number';
