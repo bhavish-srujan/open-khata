@@ -1,6 +1,7 @@
 import { INestApplication } from '@nestjs/common';
 import { JwtModule, JwtService } from '@nestjs/jwt';
 import { getRepositoryToken } from '@nestjs/typeorm';
+import { BusinessMember } from '../business/business-member.entity';
 import { Test, TestingModule } from '@nestjs/testing';
 import request from 'supertest';
 import { mkdirSync, writeFileSync, rmSync } from 'fs';
@@ -25,6 +26,7 @@ import { User } from '../users/user.entity';
  * the repositories are stubbed.
  */
 describe('UploadsController', () => {
+  let membershipRole: any = 'OWNER';
   let app: INestApplication;
   let jwt: JwtService;
 
@@ -72,6 +74,19 @@ describe('UploadsController', () => {
       imports: [JwtModule.register({ secret: 'test-secret' })],
       controllers: [UploadsController],
       providers: [
+        {
+          // JwtAuthGuard and AuthService both resolve the caller's role from
+          // their membership now, so every spec constructing them needs one.
+          provide: getRepositoryToken(BusinessMember),
+          useValue: {
+            findOneBy: jest.fn(async () => ({ id: 'm-1', role: membershipRole })),
+            find: jest.fn(async () => [
+              { id: 'm-1', businessId: 'biz-1', role: membershipRole },
+            ]),
+            create: (o: any) => o,
+            save: jest.fn(async (m: any) => m),
+          },
+        },
         UploadsService,
         {
           provide: getRepositoryToken(Receipt),

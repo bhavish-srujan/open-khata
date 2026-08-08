@@ -27,6 +27,7 @@ import { Item } from './inventory/item.entity';
 import { AuditLog } from './audit-logs/audit-log.entity';
 import { Bill } from './bills/entities/bill.entity';
 import { Receipt } from './uploads/receipt.entity';
+import { BusinessMember } from './business/business-member.entity';
 import { NotificationsModule } from './notifications/notifications.module';
 
 @Module({
@@ -55,7 +56,7 @@ import { NotificationsModule } from './notifications/notifications.module';
           url,
           // Verified TLS for any remote database; plain for local docker.
           ssl: buildDatabaseSsl(url),
-          entities: [User, Party, LedgerEntry, Business, BalanceHistory, Item, AuditLog, Bill, Receipt],
+          entities: [User, Party, LedgerEntry, Business, BalanceHistory, Item, AuditLog, Bill, Receipt, BusinessMember],
           synchronize: configService.get<string>('NODE_ENV') !== 'production', // Use migrations in production
         };
       },

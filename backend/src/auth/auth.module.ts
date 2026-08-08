@@ -8,11 +8,12 @@ import { JwtAuthGuard } from './jwt-auth.guard';
 import { User } from '../users/user.entity';
 
 import { Business } from '../business/business.entity';
+import { BusinessMember } from '../business/business-member.entity';
 
 @Global()
 @Module({
   imports: [
-    TypeOrmModule.forFeature([User, Business]),
+    TypeOrmModule.forFeature([User, Business, BusinessMember]),
     JwtModule.registerAsync({
       global: true,
       imports: [ConfigModule],

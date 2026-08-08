@@ -10,6 +10,7 @@ import { Item } from './inventory/item.entity';
 import { AuditLog } from './audit-logs/audit-log.entity';
 import { Bill } from './bills/entities/bill.entity';
 import { Receipt } from './uploads/receipt.entity';
+import { BusinessMember } from './business/business-member.entity';
 
 config(); // Load .env
 
@@ -27,6 +28,6 @@ export const AppDataSource = new DataSource({
   logging: true,
   // Must match app.module.ts exactly, or migration:generate will emit DROP
   // statements for whichever entities are missing here.
-  entities: [User, Party, LedgerEntry, Business, BalanceHistory, Item, AuditLog, Bill, Receipt],
+  entities: [User, Party, LedgerEntry, Business, BalanceHistory, Item, AuditLog, Bill, Receipt, BusinessMember],
   migrations: ['src/migrations/*.ts'],
 });

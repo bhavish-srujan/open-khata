@@ -1,18 +1,33 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { AuthService } from './auth.service';
 import { getRepositoryToken } from '@nestjs/typeorm';
+import { BusinessMember } from '../business/business-member.entity';
 import { User } from '../users/user.entity';
 import { Business } from '../business/business.entity';
 import { JwtService } from '@nestjs/jwt';
 import { SmsService } from '../notifications/sms/sms.service';
 
 describe('AuthService', () => {
+  let membershipRole: any = 'OWNER';
   let service: AuthService;
   const users = [] as any[];
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        {
+          // JwtAuthGuard and AuthService both resolve the caller's role from
+          // their membership now, so every spec constructing them needs one.
+          provide: getRepositoryToken(BusinessMember),
+          useValue: {
+            findOneBy: jest.fn(async () => ({ id: 'm-1', role: membershipRole })),
+            find: jest.fn(async () => [
+              { id: 'm-1', businessId: 'biz-1', role: membershipRole },
+            ]),
+            create: (o: any) => o,
+            save: jest.fn(async (m: any) => m),
+          },
+        },
         AuthService,
         { provide: getRepositoryToken(User), useValue: {
           findOneBy: jest.fn((q) => users.find(u => Object.keys(q).every(k => u[k] === q[k]))),

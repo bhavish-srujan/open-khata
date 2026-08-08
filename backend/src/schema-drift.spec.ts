@@ -11,6 +11,7 @@ import { Item } from './inventory/item.entity';
 import { AuditLog } from './audit-logs/audit-log.entity';
 import { Bill } from './bills/entities/bill.entity';
 import { Receipt } from './uploads/receipt.entity';
+import { BusinessMember } from './business/business-member.entity';
 
 /**
  * Guards the migration set against the entities.
@@ -33,6 +34,7 @@ const ENTITIES = [
   AuditLog,
   Bill,
   Receipt,
+  BusinessMember,
 ];
 
 /** Table name and column names exactly as TypeORM will address them. */

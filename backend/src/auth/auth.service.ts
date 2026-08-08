@@ -14,6 +14,8 @@ import { User } from '../users/user.entity';
 import { SmsService } from '../notifications/sms/sms.service';
 
 import { Business } from '../business/business.entity';
+import { BusinessMember } from '../business/business-member.entity';
+import { UserRole } from '../users/user.entity';
 
 /** How long an issued OTP stays valid. */
 const OTP_TTL_MS = 10 * 60 * 1000;
@@ -59,6 +61,8 @@ export class AuthService {
     private userRepository: Repository<User>,
     @InjectRepository(Business)
     private businessRepository: Repository<Business>,
+    @InjectRepository(BusinessMember)
+    private memberRepository: Repository<BusinessMember>,
     private jwtService: JwtService,
     private smsService: SmsService,
   ) {}
@@ -227,15 +231,50 @@ export class AuthService {
 
     const is_new_user = !user.name; // Simple heuristic for new user
 
-    // Find or create default business
-    let business = await this.businessRepository.findOneBy({ ownerId: user.id });
-    if (!business) {
-      business = this.businessRepository.create({
-        ownerId: user.id,
-        name: 'My Khata Business',
-        type: 'General Store'
+    // Resolve the business from membership, falling back to creating one.
+    //
+    // This used to look up a business by ownerId alone. Someone added as staff
+    // owns nothing, so logging in minted them a brand-new empty business rather
+    // than giving them access to the one they were added to — staff could never
+    // reach it.
+    const memberships = await this.memberRepository.find({
+      where: { userId: user.id },
+      order: { createdAt: 'ASC' },
+    });
+
+    // Prefer a business they own, so an owner who is also staff elsewhere lands
+    // on their own shop.
+    const ownedMembership = memberships.find((m) => m.role === UserRole.OWNER);
+    const activeMembership = ownedMembership ?? memberships[0];
+
+    let business: Business | null = null;
+    // Defaults to OWNER for the create-a-business path below; overwritten
+    // whenever an existing membership is found.
+    let role: UserRole = UserRole.OWNER;
+
+    if (activeMembership) {
+      business = await this.businessRepository.findOneBy({
+        id: activeMembership.businessId,
       });
-      await this.businessRepository.save(business);
+      role = activeMembership.role;
+    }
+
+    if (!business) {
+      business = await this.businessRepository.save(
+        this.businessRepository.create({
+          ownerId: user.id,
+          name: 'My Khata Business',
+          type: 'General Store',
+        }),
+      );
+      role = UserRole.OWNER;
+      await this.memberRepository.save(
+        this.memberRepository.create({
+          businessId: business.id,
+          userId: user.id,
+          role: UserRole.OWNER,
+        }),
+      );
     }
 
     // Generate JWT
@@ -243,7 +282,7 @@ export class AuthService {
       sub: user.id, 
       phone: user.phone_number, 
       businessId: business.id, 
-      role: user.role,
+      role,
       sessionVersion: user.sessionVersion
     };
     return {

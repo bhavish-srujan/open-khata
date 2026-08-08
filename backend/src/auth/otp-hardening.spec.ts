@@ -1,5 +1,6 @@
 import { UnauthorizedException, HttpException, HttpStatus } from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
+import { BusinessMember } from '../business/business-member.entity';
 import { JwtService } from '@nestjs/jwt';
 import { Test, TestingModule } from '@nestjs/testing';
 import { createHash } from 'node:crypto';
@@ -19,6 +20,7 @@ import { SmsService } from '../notifications/sms/sms.service';
 const hashed = (otp: string) => createHash('sha256').update(otp).digest('hex');
 
 describe('AuthService — OTP hardening', () => {
+  let membershipRole: any = 'OWNER';
   let service: AuthService;
   let rows: any[];
   let sendSms: jest.Mock;
@@ -47,6 +49,19 @@ describe('AuthService — OTP hardening', () => {
 
     const moduleRef: TestingModule = await Test.createTestingModule({
       providers: [
+        {
+          // JwtAuthGuard and AuthService both resolve the caller's role from
+          // their membership now, so every spec constructing them needs one.
+          provide: getRepositoryToken(BusinessMember),
+          useValue: {
+            findOneBy: jest.fn(async () => ({ id: 'm-1', role: membershipRole })),
+            find: jest.fn(async () => [
+              { id: 'm-1', businessId: 'biz-1', role: membershipRole },
+            ]),
+            create: (o: any) => o,
+            save: jest.fn(async (m: any) => m),
+          },
+        },
         AuthService,
         {
           provide: getRepositoryToken(User),

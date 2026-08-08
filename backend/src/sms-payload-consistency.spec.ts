@@ -1,5 +1,6 @@
 import { ConfigService } from '@nestjs/config';
 import { getRepositoryToken } from '@nestjs/typeorm';
+import { BusinessMember } from './business/business-member.entity';
 import { DataSource } from 'typeorm';
 import { Test } from '@nestjs/testing';
 import { JwtService } from '@nestjs/jwt';
@@ -28,6 +29,7 @@ const mockedAxios = axios as jest.Mocked<typeof axios>;
  * produce identical request envelopes.
  */
 describe('SMS payload consistency across every sender', () => {
+  let membershipRole: any = 'OWNER';
   const GATEWAY = 'http://gateway.local:8080';
   const EXPECTED_URL = 'http://gateway.local:8080/messages';
   const PHONE = '9876543210';
@@ -50,6 +52,19 @@ describe('SMS payload consistency across every sender', () => {
 
     const moduleRef = await Test.createTestingModule({
       providers: [
+        {
+          // JwtAuthGuard and AuthService both resolve the caller's role from
+          // their membership now, so every spec constructing them needs one.
+          provide: getRepositoryToken(BusinessMember),
+          useValue: {
+            findOneBy: jest.fn(async () => ({ id: 'm-1', role: membershipRole })),
+            find: jest.fn(async () => [
+              { id: 'm-1', businessId: 'biz-1', role: membershipRole },
+            ]),
+            create: (o: any) => o,
+            save: jest.fn(async (m: any) => m),
+          },
+        },
         SmsService,
         AuthService,
         RemindersService,

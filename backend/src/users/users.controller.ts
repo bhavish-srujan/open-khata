@@ -1,57 +1,64 @@
 import {
+  Body,
   Controller,
-  Get,
-  Post,
   Delete,
-  NotImplementedException,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  Req,
   UseGuards,
 } from '@nestjs/common';
 import { UsersService } from './users.service';
+import { AddStaffDto } from './dto/add-staff.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { UserRole } from './user.entity';
 
 /**
- * Staff management is disabled.
+ * Staff of the caller's business.
  *
- * There is no association between a user and a business anywhere in the schema:
- * User carries a single global `role` column and there is no membership table.
- * getStaff() therefore returned every MANAGER and CASHIER in the database —
- * names and phone numbers belonging to other businesses — to any owner who
- * asked, and addStaff() created users attached to nothing.
- *
- * Nothing in the app calls these routes; AddStaffScreen makes no network
- * request. Rather than leave a cross-tenant leak reachable behind a valid
- * token, the routes answer 501 until a business_members table exists to scope
- * them. The service methods are left in place for that work to build on.
+ * Every route is scoped to the businessId on the verified token. There is no
+ * parameter for choosing a business, so a caller cannot address one they are
+ * not a member of.
  */
 @Controller('users')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
-  private notImplemented(): never {
-    throw new NotImplementedException(
-      'Staff management is unavailable: staff are not yet scoped to a business.',
-    );
-  }
-
   @Get('staff')
   @Roles(UserRole.OWNER, UserRole.MANAGER)
-  getStaff() {
-    this.notImplemented();
+  getStaff(@Req() req) {
+    return this.usersService.getStaff(req.user.businessId);
   }
 
   @Post('staff')
   @Roles(UserRole.OWNER, UserRole.MANAGER)
-  addStaff() {
-    this.notImplemented();
+  addStaff(@Req() req, @Body() body: AddStaffDto) {
+    return this.usersService.addStaff(
+      req.user.businessId,
+      body.phoneNumber,
+      body.name,
+      body.role,
+    );
   }
 
-  @Delete('staff/:id')
+  /** Takes the membership id, not the user id: the account itself is untouched. */
+  @Delete('staff/:membershipId')
   @Roles(UserRole.OWNER, UserRole.MANAGER)
-  removeStaff() {
-    this.notImplemented();
+  @HttpCode(HttpStatus.NO_CONTENT)
+  removeStaff(
+    @Req() req,
+    @Param('membershipId', new ParseUUIDPipe()) membershipId: string,
+  ) {
+    return this.usersService.removeStaff(
+      req.user.businessId,
+      membershipId,
+      req.user.sub,
+    );
   }
 }

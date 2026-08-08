@@ -1,6 +1,7 @@
 import { INestApplication } from '@nestjs/common';
 import { JwtModule, JwtService } from '@nestjs/jwt';
 import { getRepositoryToken } from '@nestjs/typeorm';
+import { BusinessMember } from './business/business-member.entity';
 import { Test, TestingModule } from '@nestjs/testing';
 import request from 'supertest';
 import { InventoryController } from './inventory/inventory.controller';
@@ -22,6 +23,7 @@ import { User, UserRole } from './users/user.entity';
  * the User repository and the domain services are stubbed. No database.
  */
 describe('reports + inventory route protection', () => {
+  let membershipRole: any = 'OWNER';
   let app: INestApplication;
   let jwt: JwtService;
 
@@ -34,8 +36,11 @@ describe('reports + inventory route protection', () => {
   // The user row JwtAuthGuard re-reads on every request.
   const dbUser = { id: 'user-1', sessionVersion: 3 };
 
-  const tokenFor = (role: UserRole, overrides: Record<string, any> = {}) =>
-    jwt.sign({
+  const tokenFor = (role: UserRole, overrides: Record<string, any> = {}) => {
+    // The membership is the source of truth for role, so the fixture must
+    // mirror the token — which is what login does when it signs one.
+    membershipRole = role;
+    return jwt.sign({
       sub: dbUser.id,
       phone: '+919876543210',
       businessId: BUSINESS_ID,
@@ -43,12 +48,26 @@ describe('reports + inventory route protection', () => {
       sessionVersion: dbUser.sessionVersion,
       ...overrides,
     });
+  };
 
   beforeAll(async () => {
     const moduleRef: TestingModule = await Test.createTestingModule({
       imports: [JwtModule.register({ secret: SECRET })],
       controllers: [InventoryController, ReportsController],
       providers: [
+        {
+          // JwtAuthGuard and AuthService both resolve the caller's role from
+          // their membership now, so every spec constructing them needs one.
+          provide: getRepositoryToken(BusinessMember),
+          useValue: {
+            findOneBy: jest.fn(async () => ({ id: 'm-1', role: membershipRole })),
+            find: jest.fn(async () => [
+              { id: 'm-1', businessId: 'biz-1', role: membershipRole },
+            ]),
+            create: (o: any) => o,
+            save: jest.fn(async (m: any) => m),
+          },
+        },
         {
           provide: getRepositoryToken(User),
           useValue: {

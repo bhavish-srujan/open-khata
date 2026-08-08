@@ -1,6 +1,7 @@
 import { Controller, Get, INestApplication, UseGuards } from '@nestjs/common';
 import { JwtModule, JwtService } from '@nestjs/jwt';
 import { getRepositoryToken } from '@nestjs/typeorm';
+import { BusinessMember } from '../business/business-member.entity';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -32,6 +33,7 @@ class ProbeController {
 }
 
 describe('audit context propagation over HTTP', () => {
+  let membershipRole: any = 'OWNER';
   let app: INestApplication;
   let jwt: JwtService;
 
@@ -42,6 +44,19 @@ describe('audit context propagation over HTTP', () => {
       imports: [JwtModule.register({ secret: 'test-secret' })],
       controllers: [ProbeController],
       providers: [
+        {
+          // JwtAuthGuard and AuthService both resolve the caller's role from
+          // their membership now, so every spec constructing them needs one.
+          provide: getRepositoryToken(BusinessMember),
+          useValue: {
+            findOneBy: jest.fn(async () => ({ id: 'm-1', role: membershipRole })),
+            find: jest.fn(async () => [
+              { id: 'm-1', businessId: 'biz-1', role: membershipRole },
+            ]),
+            create: (o: any) => o,
+            save: jest.fn(async (m: any) => m),
+          },
+        },
         {
           provide: getRepositoryToken(User),
           useValue: {

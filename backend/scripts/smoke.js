@@ -21,7 +21,7 @@ const ROOT = path.join(__dirname, '..');
 const LOCAL_URL = 'postgresql://postgres:password@localhost:5432/khatabook';
 const TABLES = [
   'balance_history', 'audit_logs', 'ledger_entries', 'parties',
-  'items', 'bills', 'businesses', 'users',
+  'items', 'bills', 'business_members', 'businesses', 'users',
 ];
 
 function hostedUrl() {
@@ -112,6 +112,12 @@ async function localPass(request) {
     [user.id],
   );
 
+  // Required before any authenticated call: the guard resolves role from here.
+  await db.query(
+    "INSERT INTO business_members (business_id, user_id, role) VALUES ($1,$2,'OWNER')",
+    [business.id, user.id],
+  );
+
   const token = await app.get(require('@nestjs/jwt').JwtService).signAsync({
     sub: user.id, phone: '+919000000001', businessId: business.id,
     role: 'OWNER', sessionVersion: user.sessionVersion,
@@ -189,6 +195,43 @@ async function localPass(request) {
     'SELECT count(*)::int n FROM ledger_entries WHERE party_id = $1', [partyId]);
   record('party delete leaves no orphaned entries', orphan[0].n === 0,
     orphan[0].n + ' rows');
+
+  // ── staff scoping ───────────────────────────────────────────────────
+  r = await auth(request(http).post('/users/staff')).send({
+    phoneNumber: '+919888800001', name: 'Smoke Cashier', role: 'CASHIER',
+  });
+  record('POST /users/staff', r.status === 201, 'status ' + r.status);
+  const membershipId = r.body.membershipId;
+
+  r = await auth(request(http).get('/users/staff'));
+  record('GET /users/staff lists owner + new cashier',
+    r.status === 200 && r.body.length === 2,
+    'status ' + r.status + ', ' + (r.body || []).length + ' members');
+
+  // A second business with its own member must not appear in that listing.
+  const otherUser = await db.query(
+    "INSERT INTO users (phone_number, normalized_phone, name, \"sessionVersion\")" +
+    " VALUES ('+919777700001','9777700001','Other Owner',1) RETURNING id");
+  const otherBiz = await db.query(
+    "INSERT INTO businesses (owner_id, name, type) VALUES ($1,'Other Shop','Retail') RETURNING id",
+    [otherUser[0].id]);
+  await db.query(
+    "INSERT INTO business_members (business_id, user_id, role) VALUES ($1,$2,'CASHIER')",
+    [otherBiz[0].id, otherUser[0].id]);
+
+  r = await auth(request(http).get('/users/staff'));
+  const leaked = (r.body || []).some((m) => m.phoneNumber === '+919777700001');
+  record("another business's staff do not leak", !leaked,
+    leaked ? 'LEAKED' : 'scoped correctly');
+
+  r = await auth(request(http).delete('/users/staff/' + membershipId));
+  record('DELETE /users/staff/:id', r.status === 204, 'status ' + r.status);
+
+  const survivor = await db.query(
+    "SELECT count(*)::int n FROM users WHERE phone_number = '+919888800001'");
+  record('removing a member keeps their user account', survivor[0].n === 1,
+    survivor[0].n + ' user rows');
+
 
   const audits = await db.query(
     'SELECT count(*)::int n FROM audit_logs WHERE "entityName" = \'LedgerEntry\'');
