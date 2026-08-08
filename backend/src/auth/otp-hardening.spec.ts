@@ -2,6 +2,7 @@ import { UnauthorizedException, HttpException, HttpStatus } from '@nestjs/common
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { BusinessMember } from '../business/business-member.entity';
 import { JwtService } from '@nestjs/jwt';
+import { WhatsAppService } from '../notifications/whatsapp/whatsapp.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { createHash } from 'node:crypto';
 import { AuthService } from './auth.service';
@@ -49,6 +50,14 @@ describe('AuthService — OTP hardening', () => {
 
     const moduleRef: TestingModule = await Test.createTestingModule({
       providers: [
+        {
+          // AuthService now delivers login codes over WhatsApp.
+          provide: WhatsAppService,
+          useValue: {
+            isConfigured: jest.fn().mockReturnValue(false),
+            sendOtp: jest.fn().mockResolvedValue({ sent: true }),
+          },
+        },
         {
           // JwtAuthGuard and AuthService both resolve the caller's role from
           // their membership now, so every spec constructing them needs one.

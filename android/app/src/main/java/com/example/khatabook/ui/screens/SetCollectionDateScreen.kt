@@ -41,6 +41,7 @@ import androidx.compose.ui.window.Dialog
 import com.example.khatabook.data.model.Party
 import com.example.khatabook.data.model.PartyType
 import com.example.khatabook.ui.components.bounceClick
+import com.example.khatabook.utils.SmsSender
 import com.example.khatabook.ui.theme.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -525,20 +526,24 @@ fun SetCollectionDateScreen(
 
                             BounceButton(
                                 onClick = {
-                                    val smsIntent = Intent(Intent.ACTION_VIEW, Uri.parse("sms:${party.phone}")).apply {
-                                        putExtra("sms_body", messageText)
+                                    val toast = when (val r = SmsSender.send(context, party.phone, messageText)) {
+                                        is SmsSender.Result.Sent -> "Reminder sent to ${party.name}"
+                                        is SmsSender.Result.PermissionMissing -> "Allow SMS permission in Settings"
+                                        is SmsSender.Result.Failed -> "Could not send: ${r.reason}"
                                     }
-                                    context.startActivity(smsIntent)
+                                    android.widget.Toast.makeText(context, toast, android.widget.Toast.LENGTH_LONG).show()
                                     showReminderDialog = false
                                 },
                                 colors = ButtonDefaults.buttonColors(containerColor = KhatabookHeaderBlue),
                                 shape = RoundedCornerShape(8.dp),
                                 contentPadding = PaddingValues(horizontal = 6.dp),
                                 modifier = Modifier.weight(1f).height(46.dp).bounceClick {
-                                    val smsIntent = Intent(Intent.ACTION_VIEW, Uri.parse("sms:${party.phone}")).apply {
-                                        putExtra("sms_body", messageText)
+                                    val toast = when (val r = SmsSender.send(context, party.phone, messageText)) {
+                                        is SmsSender.Result.Sent -> "Reminder sent to ${party.name}"
+                                        is SmsSender.Result.PermissionMissing -> "Allow SMS permission in Settings"
+                                        is SmsSender.Result.Failed -> "Could not send: ${r.reason}"
                                     }
-                                    context.startActivity(smsIntent)
+                                    android.widget.Toast.makeText(context, toast, android.widget.Toast.LENGTH_LONG).show()
                                     showReminderDialog = false
                                 }
                             ) {

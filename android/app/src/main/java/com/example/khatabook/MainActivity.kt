@@ -1,6 +1,10 @@
 package com.example.khatabook
 
+import android.Manifest
 import android.content.Context
+import android.os.Build
+import androidx.activity.result.contract.ActivityResultContracts
+import com.example.khatabook.utils.SmsSender
 import android.os.Bundle
 import android.view.WindowManager
 import androidx.security.crypto.EncryptedSharedPreferences
@@ -9,7 +13,10 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -85,6 +92,45 @@ internal fun clearSession(
     editor.apply()
 }
 
+/**
+ * Adds a contact to the active business, returning a message to show.
+ *
+ * Errors are mapped rather than surfaced raw: the server distinguishes an
+ * already-present member from a rejected role, and both are things the person
+ * tapping can act on.
+ */
+internal suspend fun addStaffMember(
+    contact: com.example.khatabook.ui.screens.ContactItem,
+    role: String,
+): String {
+    return try {
+        val response = com.example.khatabook.data.api.NetworkClient.apiService.addStaff(
+            com.example.khatabook.data.api.AddStaffRequest(
+                phoneNumber = contact.phone,
+                name = contact.name,
+                role = role,
+            )
+        )
+        when {
+            response.isSuccessful -> "${contact.name} added as $role"
+            response.code() == 400 -> {
+                val body = response.errorBody()?.string().orEmpty()
+                when {
+                    body.contains("already a member") -> "${contact.name} is already in this business"
+                    body.contains("owner") -> "Owners cannot be added this way"
+                    body.contains("phone") -> "That contact has no valid phone number"
+                    else -> "Could not add ${contact.name}"
+                }
+            }
+            response.code() == 401 -> "Session expired. Please log in again."
+            response.code() == 403 -> "Only owners and managers can add staff"
+            else -> "Could not add staff (HTTP ${response.code()})"
+        }
+    } catch (e: Exception) {
+        "Could not reach the server. Check your connection."
+    }
+}
+
 enum class AppScreen {
     LANGUAGE_SELECTION,
     PERMISSIONS,
@@ -120,6 +166,28 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var repository: KhatabookRepository
 
+    /**
+     * Requests SEND_SMS a single time.
+     *
+     * Deliberately fire-and-forget: a refusal must not block the app, and every
+     * send path reports PermissionMissing with a message telling the user how to
+     * grant it later.
+     */
+    private fun requestSmsPermissionOnce() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
+        if (SmsSender.hasPermission(this)) return
+
+        val alreadyAsked = getSharedPreferences("khatabook_repository_prefs", MODE_PRIVATE)
+            .getBoolean("sms_permission_requested", false)
+        if (alreadyAsked) return
+
+        getSharedPreferences("khatabook_repository_prefs", MODE_PRIVATE)
+            .edit().putBoolean("sms_permission_requested", true).apply()
+
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+            .launch(Manifest.permission.SEND_SMS)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
@@ -127,6 +195,11 @@ class MainActivity : AppCompatActivity() {
         // window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
 
         repository = KhatabookRepository(applicationContext)
+
+        // Ask for SMS once, at startup, rather than at each send. Customer
+        // balance updates and reminders now go out silently via SmsManager, so
+        // without this the first reminder would fail with nothing to explain it.
+        requestSmsPermissionOnce()
 
         // Init NetworkClient with a JWT token provider that reads from
         // EncryptedSharedPreferences on every request — so login is
@@ -230,6 +303,14 @@ class MainActivity : AppCompatActivity() {
                         mutableStateListOf(*phones.toTypedArray())
                     }
                     var showAccountSwitcher by remember { mutableStateOf(false) }
+
+                    // Add-staff flow. The contact picker used to just navigate
+                    // back without contacting the server at all.
+                    var staffContactPending by remember {
+                        mutableStateOf<com.example.khatabook.ui.screens.ContactItem?>(null)
+                    }
+                    var staffRefreshKey by remember { mutableStateOf(0) }
+                    var staffResultMessage by remember { mutableStateOf<String?>(null) }
                     var phoneNumberToVerify by remember { mutableStateOf("") }
                     var firebaseVerificationId by remember { mutableStateOf("") }
 
@@ -717,7 +798,8 @@ class MainActivity : AppCompatActivity() {
                                 AppScreen.ADD_STAFF -> {
                                     AddStaffScreen(
                                         onBackClick = { navigateBack() },
-                                        onAddStaffClick = { navigateTo(AppScreen.STAFF_CONTACT_PICKER) }
+                                        onAddStaffClick = { navigateTo(AppScreen.STAFF_CONTACT_PICKER) },
+                                        refreshKey = staffRefreshKey,
                                     )
                                 }
 
@@ -725,7 +807,10 @@ class MainActivity : AppCompatActivity() {
                                     StaffContactPickerScreen(
                                         onBackClick = { navigateBack() },
                                         onContactSelect = { contact ->
-                                            navigateBack()
+                                            // Choose a role before sending: the
+                                            // server accepts MANAGER or CASHIER
+                                            // only, and refuses OWNER outright.
+                                            staffContactPending = contact
                                         }
                                     )
                                 }
@@ -821,6 +906,49 @@ class MainActivity : AppCompatActivity() {
                                 switcherScope.launch { repository.switchBusiness(biz.id) }
                             }
                         )
+                    }
+
+                    staffContactPending?.let { contact ->
+                        val staffScope = rememberCoroutineScope()
+                        AlertDialog(
+                            onDismissRequest = { staffContactPending = null },
+                            title = { Text("Add ${contact.name} as staff") },
+                            text = {
+                                Text(
+                                    "Managers can view reports and manage staff. " +
+                                        "Cashiers can record transactions only."
+                                )
+                            },
+                            confirmButton = {
+                                TextButton(onClick = {
+                                    staffContactPending = null
+                                    staffScope.launch {
+                                        staffResultMessage = addStaffMember(contact, "MANAGER")
+                                        staffRefreshKey++
+                                    }
+                                    navigateBack()
+                                }) { Text("MANAGER") }
+                            },
+                            dismissButton = {
+                                TextButton(onClick = {
+                                    staffContactPending = null
+                                    staffScope.launch {
+                                        staffResultMessage = addStaffMember(contact, "CASHIER")
+                                        staffRefreshKey++
+                                    }
+                                    navigateBack()
+                                }) { Text("CASHIER") }
+                            },
+                        )
+                    }
+
+                    staffResultMessage?.let { message ->
+                        LaunchedEffect(message) {
+                            android.widget.Toast
+                                .makeText(context, message, android.widget.Toast.LENGTH_LONG)
+                                .show()
+                            staffResultMessage = null
+                        }
                     }
 
                     if (showAccountSwitcher) {

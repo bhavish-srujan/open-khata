@@ -12,7 +12,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -20,6 +20,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.khatabook.data.api.NetworkClient
+import com.example.khatabook.data.api.StaffMemberResponse
+import kotlinx.coroutines.launch
 import com.example.khatabook.ui.theme.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -27,9 +30,44 @@ import com.example.khatabook.ui.theme.*
 fun AddStaffScreen(
     onBackClick: () -> Unit,
     onAddStaffClick: () -> Unit,
+    /** Bumped by the caller after a member is added, to force a refetch. */
+    refreshKey: Int = 0,
     modifier: Modifier = Modifier
 ) {
     val scrollState = rememberScrollState()
+    val scope = rememberCoroutineScope()
+
+    // Real members of the active business. This screen previously showed only a
+    // static illustration and never contacted the server.
+    var staff by remember { mutableStateOf<List<StaffMemberResponse>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(true) }
+    var loadError by remember { mutableStateOf<String?>(null) }
+    var actionMessage by remember { mutableStateOf<String?>(null) }
+    var pendingRemoval by remember { mutableStateOf<StaffMemberResponse?>(null) }
+
+    suspend fun reload() {
+        isLoading = true
+        loadError = null
+        try {
+            val response = NetworkClient.apiService.getStaff()
+            val body = response.body()
+            if (response.isSuccessful && body != null) {
+                staff = body
+            } else {
+                loadError = when (response.code()) {
+                    401 -> "Session expired. Please log in again."
+                    403 -> "Only owners and managers can view staff."
+                    else -> "Could not load staff (HTTP " + response.code() + ")."
+                }
+            }
+        } catch (e: Exception) {
+            loadError = "Could not reach the server. Check your connection."
+        } finally {
+            isLoading = false
+        }
+    }
+
+    LaunchedEffect(refreshKey) { reload() }
 
     Scaffold(
         topBar = {
@@ -62,6 +100,46 @@ fun AddStaffScreen(
             }
         }
     ) { paddingValues ->
+        pendingRemoval?.let { member ->
+            AlertDialog(
+                onDismissRequest = { pendingRemoval = null },
+                title = { Text("Remove staff member?") },
+                text = {
+                    Text(
+                        (member.name ?: member.phoneNumber) +
+                            " will lose access to this business. Their account, and any " +
+                            "other business they work in, are unaffected.",
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        val target = member
+                        pendingRemoval = null
+                        scope.launch {
+                            actionMessage = try {
+                                val res = NetworkClient.apiService.removeStaff(target.membershipId)
+                                when {
+                                    res.isSuccessful -> {
+                                        reload()
+                                        "Removed " + (target.name ?: target.phoneNumber)
+                                    }
+                                    res.code() == 400 -> "An owner cannot be removed."
+                                    res.code() == 403 -> "You cannot remove yourself."
+                                    res.code() == 404 -> "That person is no longer a member."
+                                    else -> "Could not remove (HTTP " + res.code() + ")."
+                                }
+                            } catch (e: Exception) {
+                                "Could not reach the server. Check your connection."
+                            }
+                        }
+                    }) { Text("REMOVE", color = KhatabookGiveRed) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { pendingRemoval = null }) { Text("CANCEL") }
+                },
+            )
+        }
+
         Column(
             modifier = modifier
                 .fillMaxSize()
@@ -69,6 +147,87 @@ fun AddStaffScreen(
                 .background(KhatabookBgLight)
                 .verticalScroll(scrollState)
         ) {
+            // Current staff, fetched from the server.
+            Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+                Text(
+                    "Current Staff",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = KhatabookTextDark,
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                when {
+                    isLoading -> Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
+                        horizontalArrangement = Arrangement.Center,
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            strokeWidth = 2.dp,
+                            color = KhatabookHeaderBlue,
+                        )
+                    }
+
+                    loadError != null -> Text(
+                        loadError!!,
+                        fontSize = 13.sp,
+                        color = KhatabookGiveRed,
+                        modifier = Modifier.padding(vertical = 12.dp),
+                    )
+
+                    staff.isEmpty() -> Text(
+                        "No staff yet. Add someone to help run this business.",
+                        fontSize = 13.sp,
+                        color = KhatabookTextMuted,
+                        modifier = Modifier.padding(vertical = 12.dp),
+                    )
+
+                    else -> staff.forEach { member ->
+                        Card(
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = CardDefaults.cardColors(containerColor = Color.White),
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        member.name ?: member.phoneNumber,
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = KhatabookTextDark,
+                                    )
+                                    Text(
+                                        member.role + " - " + member.phoneNumber,
+                                        fontSize = 12.sp,
+                                        color = KhatabookTextMuted,
+                                    )
+                                }
+                                // Owners cannot be removed; the server refuses it
+                                // too, so the action is simply not offered.
+                                if (member.role != "OWNER") {
+                                    TextButton(onClick = { pendingRemoval = member }) {
+                                        Text("REMOVE", color = KhatabookGiveRed, fontSize = 12.sp)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                actionMessage?.let {
+                    Text(
+                        it,
+                        fontSize = 12.sp,
+                        color = KhatabookTextMuted,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                }
+            }
+
             // Hero Visual Graphic Container
             Box(
                 modifier = Modifier

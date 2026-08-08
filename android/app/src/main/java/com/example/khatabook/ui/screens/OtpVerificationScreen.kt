@@ -63,65 +63,10 @@ fun OtpVerificationScreen(
         }
     }
 
-    val context = LocalContext.current
-    DisposableEffect(context) {
-        val receiver = object : BroadcastReceiver() {
-            override fun onReceive(context: Context?, intent: Intent?) {
-                if (intent?.action == "android.provider.Telephony.SMS_RECEIVED") {
-                    val bundle = intent.extras
-                    if (bundle != null) {
-                        val pdus = bundle.get("pdus") as? Array<*>
-                        if (pdus != null) {
-                            for (pdu in pdus) {
-                                val format = bundle.getString("format")
-                                val sms = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                                    SmsMessage.createFromPdu(pdu as ByteArray, format)
-                                } else {
-                                    @Suppress("DEPRECATION")
-                                    SmsMessage.createFromPdu(pdu as ByteArray)
-                                }
-                                val messageBody = sms.messageBody
-                                if (messageBody != null) {
-                                    // Extract 6-digit OTP using Regex (Firebase typically sends '123456 is your verification code')
-                                    val regex = Regex("(?<!\\d)(\\d{6})(?!\\d)")
-                                    val matchResult = regex.find(messageBody)
-                                    val otp = matchResult?.groupValues?.get(1)
-                                    if (otp != null) {
-                                        otpCode = otp
-                                        // Auto-submit logic
-                                            isLoading = true
-                                            coroutineScope.launch {
-                                                try {
-                                                    val request = com.example.khatabook.data.api.VerifyOtpRequest(phoneNumber, otpCode)
-                                                    val response = NetworkClient.apiService.verifyOtp(request)
-                                                    if (response.isSuccessful && response.body() != null) {
-                                                        val token = response.body()!!.access_token
-                                                        val isNewUser = response.body()!!.is_new_user
-                                                        onVerifySuccess(token, isNewUser)
-                                                    } else {
-                                                        errorMessage = response.errorBody()?.string() ?: "Invalid OTP"
-                                                        otpCode = ""
-                                                    }
-                                                } catch (e: Exception) {
-                                                    errorMessage = "Network error: ${e.message}"
-                                                } finally {
-                                                    isLoading = false
-                                                }
-                                            }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        val filter = IntentFilter("android.provider.Telephony.SMS_RECEIVED")
-        context.registerReceiver(receiver, filter)
-        onDispose {
-            context.unregisterReceiver(receiver)
-        }
-    }
+    // No SMS auto-fill: the code now arrives over WhatsApp, which an app
+    // cannot read. The RECEIVE_SMS broadcast receiver that used to scrape it
+    // would never fire, and reading the user's inbox for a code we no longer
+    // send there is not something to keep on the off chance.
 
     Scaffold(
         topBar = {
@@ -162,7 +107,7 @@ fun OtpVerificationScreen(
                 color = KhatabookTextDark
             )
             Text(
-                text = "Enter 6-digit code sent to $phoneNumber",
+                text = "Enter the 6-digit code sent on WhatsApp to $phoneNumber",
                 fontSize = 13.sp,
                 color = KhatabookTextMuted,
                 textAlign = TextAlign.Center,

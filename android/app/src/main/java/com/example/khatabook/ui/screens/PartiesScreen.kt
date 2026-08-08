@@ -55,6 +55,7 @@ import com.example.khatabook.ui.components.LedgerSheetRecord
 import com.example.khatabook.ui.components.ProfileLockVerificationDialog
 import com.example.khatabook.ui.components.SmartAiSheetScannerDialog
 import com.example.khatabook.ui.components.bounceClick
+import com.example.khatabook.utils.SmsSender
 import com.example.khatabook.ui.theme.*
 
 @Composable
@@ -782,14 +783,14 @@ fun PartiesScreen(
                 party = party,
                 onDismiss = { partyToRemind = null },
                 onSmsClick = {
-                    try {
+                    run {
                         val message = "Dear ${party.name}, your total outstanding balance is ₹ ${kotlin.math.abs(party.currentBalance).toInt()}. Please clear your dues on Khatabook."
-                        val smsIntent = Intent(Intent.ACTION_VIEW, Uri.parse("sms:${party.phone}")).apply {
-                            putExtra("sms_body", message)
+                        val toast = when (val result = SmsSender.send(context, party.phone, message)) {
+                            is SmsSender.Result.Sent -> "Reminder sent to ${party.name}"
+                            is SmsSender.Result.PermissionMissing -> "Allow SMS permission in Settings to send reminders"
+                            is SmsSender.Result.Failed -> "Could not send: ${result.reason}"
                         }
-                        context.startActivity(smsIntent)
-                    } catch (e: Exception) {
-                        android.widget.Toast.makeText(context, "No SMS app found", android.widget.Toast.LENGTH_SHORT).show()
+                        android.widget.Toast.makeText(context, toast, android.widget.Toast.LENGTH_LONG).show()
                     }
                     partyToRemind = null
                 },

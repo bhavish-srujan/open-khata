@@ -46,6 +46,7 @@ import com.example.khatabook.ui.components.ItemPopIn
 import com.example.khatabook.ui.components.LedgerEntryCard
 import com.example.khatabook.ui.components.RemindBottomSheet
 import com.example.khatabook.ui.components.bounceClick
+import com.example.khatabook.utils.SmsSender
 import com.example.khatabook.ui.theme.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -260,14 +261,16 @@ fun CustomerLedgerScreen(
                         QuickActionButton(icon = Icons.Default.Description, label = "Report", onClick = { showBillPdfDialog = true })
                         QuickActionButton(icon = Icons.Default.Notifications, label = "Reminder", onClick = { showRemindBottomSheet = true })
                         QuickActionButton(icon = Icons.Default.Message, label = "SMS", onClick = {
-                            try {
-                                val message = "Dear ${party.name}, your total outstanding balance is ₹ $balanceAmount. Please clear your dues on Khatabook."
-                                val smsIntent = Intent(Intent.ACTION_VIEW, Uri.parse("sms:${party.phone}")).apply {
-                                    putExtra("sms_body", message)
-                                }
-                                context.startActivity(smsIntent)
-                            } catch (e: Exception) {
-                                Toast.makeText(context, "No SMS app found", Toast.LENGTH_SHORT).show()
+                            // Sent directly rather than opening the Messages app,
+                            // which used to throw the user out of the ledger.
+                            val message = "Dear ${party.name}, your total outstanding balance is ₹ $balanceAmount. Please clear your dues on Khatabook."
+                            when (val result = SmsSender.send(context, party.phone, message)) {
+                                is SmsSender.Result.Sent ->
+                                    Toast.makeText(context, "Reminder sent to ${party.name}", Toast.LENGTH_SHORT).show()
+                                is SmsSender.Result.PermissionMissing ->
+                                    Toast.makeText(context, "Allow SMS permission in Settings to send reminders", Toast.LENGTH_LONG).show()
+                                is SmsSender.Result.Failed ->
+                                    Toast.makeText(context, "Could not send: ${result.reason}", Toast.LENGTH_LONG).show()
                             }
                         })
                     }
@@ -313,14 +316,16 @@ fun CustomerLedgerScreen(
             party = party,
             onDismiss = { showRemindBottomSheet = false },
             onSmsClick = {
-                try {
+                run {
                     val message = "Dear ${party.name}, your total outstanding balance is ₹ ${kotlin.math.abs(party.currentBalance).toInt()}. Please clear your dues on Khatabook."
-                    val smsIntent = Intent(Intent.ACTION_VIEW, Uri.parse("sms:${party.phone}")).apply {
-                        putExtra("sms_body", message)
+                    when (val result = SmsSender.send(context, party.phone, message)) {
+                        is SmsSender.Result.Sent ->
+                            Toast.makeText(context, "Reminder sent", Toast.LENGTH_SHORT).show()
+                        is SmsSender.Result.PermissionMissing ->
+                            Toast.makeText(context, "Allow SMS permission in Settings to send reminders", Toast.LENGTH_LONG).show()
+                        is SmsSender.Result.Failed ->
+                            Toast.makeText(context, "Could not send: ${result.reason}", Toast.LENGTH_LONG).show()
                     }
-                    context.startActivity(smsIntent)
-                } catch (e: Exception) {
-                    Toast.makeText(context, "No SMS app found", Toast.LENGTH_SHORT).show()
                 }
                 showRemindBottomSheet = false
             },

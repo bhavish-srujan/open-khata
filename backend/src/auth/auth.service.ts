@@ -12,6 +12,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from '../users/user.entity';
 import { SmsService } from '../notifications/sms/sms.service';
+import { WhatsAppService } from '../notifications/whatsapp/whatsapp.service';
 
 import { Business } from '../business/business.entity';
 import { BusinessMember } from '../business/business-member.entity';
@@ -65,6 +66,7 @@ export class AuthService {
     private memberRepository: Repository<BusinessMember>,
     private jwtService: JwtService,
     private smsService: SmsService,
+    private whatsAppService: WhatsAppService,
   ) {}
 
   private normalizePhoneForStorage(value: string): string {
@@ -163,21 +165,41 @@ export class AuthService {
     user.otpAttempts = 0;
     await this.userRepository.save(user);
 
-    if (!this.smsService.isConfigured()) {
-      this.logger.warn(`MOCK SMS: Requested OTP for ${phoneNumber}. Use ${generatedOtp} to verify.`);
+    // Login codes go over WhatsApp. Customer-facing messages — balance updates
+    // and collection reminders — stay on SMS, because those reach people who
+    // may not use WhatsApp at all.
+    if (!this.whatsAppService.isConfigured()) {
+      this.logger.warn(
+        `MOCK WhatsApp: Requested OTP for ${phoneNumber}. Use ${generatedOtp} to verify.`,
+      );
       return { success: true, message: 'OTP Sent successfully (Mock)' };
     }
 
-    // Delegated to SmsService so the OTP payload cannot drift from the shape the
-    // other senders use. The wire format is unchanged.
-    const sent = await this.smsService.sendSms(
-      phoneNumber,
-      `Your Khatabook verification code is: ${generatedOtp}. Valid for 10 minutes.`,
-    );
+    const result = await this.whatsAppService.sendOtp(phoneNumber, generatedOtp);
 
-    if (!sent) {
-      this.logger.error('Error requesting OTP via Android SMS Gateway');
-      throw new BadRequestException('Failed to send OTP');
+    if (!result.sent) {
+      // Distinguish the causes a caller can act on. The code itself is never
+      // included in any of these paths.
+      switch (result.failure) {
+        case 'invalid_number':
+          throw new BadRequestException(
+            'That number is not reachable on WhatsApp. Check it and try again.',
+          );
+        case 'rate_limited':
+          throw new HttpException(
+            'Too many messages right now. Please try again shortly.',
+            HttpStatus.TOO_MANY_REQUESTS,
+          );
+        case 'template_rejected':
+        case 'auth_failed':
+          // A misconfiguration on our side, not the caller's fault.
+          throw new HttpException(
+            'Login is temporarily unavailable. Please try again later.',
+            HttpStatus.SERVICE_UNAVAILABLE,
+          );
+        default:
+          throw new BadRequestException('Failed to send OTP');
+      }
     }
 
     return { success: true, message: 'OTP Sent successfully' };

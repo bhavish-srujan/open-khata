@@ -105,6 +105,25 @@ data class CreateBusinessRequest(
     val type: String? = null
 )
 
+// ─── Staff DTOs ──────────────────────────────────────────────
+/** A member of the active business. `membershipId` is what removal takes. */
+@Keep
+data class StaffMemberResponse(
+    val membershipId: String,
+    val userId: String,
+    val name: String?,
+    val phoneNumber: String,
+    val role: String,
+    val addedAt: String
+)
+
+@Keep
+data class AddStaffRequest(
+    val phoneNumber: String,
+    val name: String,
+    val role: String   // MANAGER or CASHIER; OWNER is refused server-side
+)
+
 // ─── Reports DTOs ────────────────────────────────────────────
 @Keep
 data class CashflowResponse(
@@ -215,6 +234,16 @@ interface KhatabookApiService {
         @Query("from") from: String? = null,
         @Query("to") to: String? = null
     ): Response<List<LedgerFeedEntry>>
+
+    // Staff
+    @GET("users/staff")
+    suspend fun getStaff(): Response<List<StaffMemberResponse>>
+
+    @POST("users/staff")
+    suspend fun addStaff(@Body body: AddStaffRequest): Response<StaffMemberResponse>
+
+    @DELETE("users/staff/{membershipId}")
+    suspend fun removeStaff(@Path("membershipId") membershipId: String): Response<Unit>
 
     // Businesses
     @GET("businesses")

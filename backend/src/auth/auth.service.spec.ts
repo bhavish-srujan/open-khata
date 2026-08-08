@@ -1,3 +1,4 @@
+import { WhatsAppService } from '../notifications/whatsapp/whatsapp.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { AuthService } from './auth.service';
 import { getRepositoryToken } from '@nestjs/typeorm';
@@ -15,6 +16,14 @@ describe('AuthService', () => {
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        {
+          // AuthService now delivers login codes over WhatsApp.
+          provide: WhatsAppService,
+          useValue: {
+            isConfigured: jest.fn().mockReturnValue(false),
+            sendOtp: jest.fn().mockResolvedValue({ sent: true }),
+          },
+        },
         {
           // JwtAuthGuard and AuthService both resolve the caller's role from
           // their membership now, so every spec constructing them needs one.
