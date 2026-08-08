@@ -58,7 +58,12 @@ import { StorageModule } from './storage/storage.module';
           // Verified TLS for any remote database; plain for local docker.
           ssl: buildDatabaseSsl(url),
           entities: [User, Party, LedgerEntry, Business, BalanceHistory, Item, AuditLog, Bill, Receipt, BusinessMember],
-          synchronize: configService.get<string>('NODE_ENV') !== 'production', // Use migrations in production
+          // Never synchronize, in any environment. It silently ALTERs and DROPs
+          // columns to match the entities, and this project has already had a
+          // local .env pointed at the production database — one boot would have
+          // been enough to lose a column of live financial data. The migration
+          // set is complete and idempotent; use it everywhere.
+          synchronize: false,
         };
       },
     }),
