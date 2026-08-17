@@ -13,11 +13,49 @@ services:
         sync: false
       - key: JWT_SECRET
         sync: false
-      - key: SMS_GATEWAY_URL
+      - key: TEXTBEE_API_KEY
         sync: false
-      - key: SMS_GATEWAY_USERNAME
-        sync: false
-      - key: SMS_GATEWAY_PASSWORD
+      - key: TEXTBEE_DEVICE_ID
         sync: false
       - key: GEMINI_API_KEY
         sync: false
+      # Gemini generateContent timeout, in ms — not a secret, so given
+      # directly rather than sync: false. See ScanningService/.env.example.
+      - key: AI_TIMEOUT_MS
+        value: 45000
+      # Scan Khata's Gemini model — not a secret. gemini-2.5-flash and
+      # gemini-3.5-flash were both ruled out for this key (404 account
+      # restriction, and 60% 503 under real testing, respectively); see
+      # .env.example for the full reliability comparison.
+      - key: GEMINI_MODEL
+        value: gemini-flash-lite-latest
+      # Object storage for uploaded receipts — REQUIRED in production.
+      # StorageModule.selectStorageDriver() refuses to boot under
+      # NODE_ENV=production without all three: Render's filesystem is
+      # ephemeral, so falling back to local disk would silently lose every
+      # receipt on the next deploy. Listed here (even though unset) so a
+      # deploy that follows this file cannot omit them by accident.
+      - key: S3_BUCKET
+        sync: false
+      - key: S3_ACCESS_KEY_ID
+        sync: false
+      - key: S3_SECRET_ACCESS_KEY
+        sync: false
+      # Required for R2/MinIO; leave unset for AWS S3.
+      - key: S3_ENDPOINT
+        sync: false
+      - key: S3_REGION
+        value: auto
+      - key: S3_FORCE_PATH_STYLE
+        value: false
+      # AES256 on AWS S3; leave blank for R2 (encrypted at rest already).
+      - key: S3_SERVER_SIDE_ENCRYPTION
+        sync: false
+      # Comma-separated browser origins allowed to call this API. Blank
+      # blocks all cross-origin browser access; the Android client sends no
+      # Origin header and is unaffected either way.
+      - key: CORS_ORIGINS
+        sync: false
+      # Off unless exactly "true" — see CronSchedulerService.
+      - key: REMINDERS_ENABLED
+        value: false

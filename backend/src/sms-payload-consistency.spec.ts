@@ -2,7 +2,6 @@ import { ConfigService } from '@nestjs/config';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { BusinessMember } from './business/business-member.entity';
 import { DataSource } from 'typeorm';
-import { WhatsAppService } from './notifications/whatsapp/whatsapp.service';
 import { Test } from '@nestjs/testing';
 import { JwtService } from '@nestjs/jwt';
 import axios from 'axios';
@@ -20,27 +19,31 @@ const mockedAxios = axios as jest.Mocked<typeof axios>;
 /**
  * Every outbound SMS must hit the gateway with one payload shape.
  *
- * Previously SmsService (welcome + transaction messages) posted
- * `{ phoneNumber, message }` to the bare SMS_GATEWAY_URL while AuthService and
- * RemindersService posted `{ phoneNumbers: [...], message }` to
- * `<base>/messages`. Only the latter matched the gateway, so the two
- * SmsService-backed messages had been failing silently.
+ * This suite previously pinned an earlier, generic-gateway design
+ * (SMS_GATEWAY_URL, Basic Auth, `{phoneNumbers, message}`). That design was
+ * superseded by the TextBee integration SmsService actually implements
+ * today (TEXTBEE_API_KEY / TEXTBEE_DEVICE_ID, x-api-key auth, `{receivers,
+ * smsBody}`) — see sms.service.spec.ts for the direct coverage of that
+ * contract.
  *
- * OTP delivery has since moved to WhatsApp, so the senders that remain on SMS
- * are the reminder, the welcome message and the per-transaction update. Those
- * are the ones that must agree, and they are the ones asserted here.
+ * OTP delivery does not go over WhatsApp: there is no WhatsApp integration in
+ * this codebase at all. AuthService.requestOtp() calls SmsService.sendSms()
+ * directly and exclusively — TextBee is the only OTP provider, with no
+ * fallback. So OTP is not an exception here: all four senders (reminder,
+ * welcome message, per-transaction update, and OTP) must agree on one
+ * envelope, and that is what this file asserts.
  */
 describe('SMS payload consistency across every sender', () => {
-  let membershipRole: any = 'OWNER';
-  const GATEWAY = 'http://gateway.local:8080';
-  const EXPECTED_URL = 'http://gateway.local:8080/messages';
+  const membershipRole: any = 'OWNER';
+  const DEVICE_ID = 'device-123';
+  const API_KEY = 'txb_test_key';
+  const EXPECTED_URL = `https://api.textbee.dev/api/v1/gateway/devices/${DEVICE_ID}/send-sms`;
   const PHONE = '9876543210';
   const E164 = '+919876543210';
 
   const env: Record<string, string> = {
-    SMS_GATEWAY_URL: GATEWAY,
-    SMS_GATEWAY_USERNAME: 'user',
-    SMS_GATEWAY_PASSWORD: 'pass',
+    TEXTBEE_API_KEY: API_KEY,
+    TEXTBEE_DEVICE_ID: DEVICE_ID,
   };
 
   let smsService: SmsService;
@@ -50,24 +53,19 @@ describe('SMS payload consistency across every sender', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
-    mockedAxios.post.mockResolvedValue({ status: 200 } as any);
+    mockedAxios.post.mockResolvedValue({ status: 200 });
 
     const moduleRef = await Test.createTestingModule({
       providers: [
-        {
-          // AuthService now delivers login codes over WhatsApp.
-          provide: WhatsAppService,
-          useValue: {
-            isConfigured: jest.fn().mockReturnValue(false),
-            sendOtp: jest.fn().mockResolvedValue({ sent: true }),
-          },
-        },
         {
           // JwtAuthGuard and AuthService both resolve the caller's role from
           // their membership now, so every spec constructing them needs one.
           provide: getRepositoryToken(BusinessMember),
           useValue: {
-            findOneBy: jest.fn(async () => ({ id: 'm-1', role: membershipRole })),
+            findOneBy: jest.fn(async () => ({
+              id: 'm-1',
+              role: membershipRole,
+            })),
             find: jest.fn(async () => [
               { id: 'm-1', businessId: 'biz-1', role: membershipRole },
             ]),
@@ -83,9 +81,14 @@ describe('SMS payload consistency across every sender', () => {
         {
           provide: DataSource,
           // PartyService.delete removes dependents transactionally.
-          useValue: { transaction: async (cb) => cb({
-            find: async () => [], delete: async () => undefined, remove: async () => undefined,
-          }) },
+          useValue: {
+            transaction: async (cb) =>
+              cb({
+                find: async () => [],
+                delete: async () => undefined,
+                remove: async () => undefined,
+              }),
+          },
         },
         { provide: JwtService, useValue: { signAsync: jest.fn() } },
         {
@@ -102,7 +105,9 @@ describe('SMS payload consistency across every sender', () => {
         {
           provide: getRepositoryToken(Business),
           // PartyService now resolves the business name for the welcome SMS.
-          useValue: { findOne: async () => ({ id: 'biz-1', name: 'Test Shop' }) },
+          useValue: {
+            findOne: async () => ({ id: 'biz-1', name: 'Test Shop' }),
+          },
         },
         {
           provide: getRepositoryToken(Party),
@@ -126,19 +131,19 @@ describe('SMS payload consistency across every sender', () => {
     const [url, payload, config] = mockedAxios.post.mock.calls[0] as any;
     return {
       url,
-      phoneNumbers: payload.phoneNumbers,
+      receivers: payload.receivers,
       payloadKeys: Object.keys(payload).sort(),
       contentType: config.headers['Content-Type'],
-      auth: config.auth,
+      apiKeyHeader: config.headers['x-api-key'],
     };
   };
 
   const EXPECTED_ENVELOPE = {
     url: EXPECTED_URL,
-    phoneNumbers: [E164],
-    payloadKeys: ['message', 'phoneNumbers'],
+    receivers: [E164],
+    payloadKeys: ['receivers', 'smsBody'],
     contentType: 'application/json',
-    auth: { username: 'user', password: 'pass' },
+    apiKeyHeader: API_KEY,
   };
 
   it('reminder send (RemindersService) uses the canonical envelope', async () => {
@@ -166,7 +171,14 @@ describe('SMS payload consistency across every sender', () => {
     expect(capturedEnvelope()).toEqual(EXPECTED_ENVELOPE);
   });
 
-  it('every SMS sender produces a byte-identical envelope', async () => {
+  it('OTP send also uses the canonical envelope — it is not a special case', async () => {
+    await authService.requestOtp(PHONE);
+
+    expect(mockedAxios.post).toHaveBeenCalledTimes(1);
+    expect(capturedEnvelope()).toEqual(EXPECTED_ENVELOPE);
+  });
+
+  it('every SMS sender, OTP included, produces a byte-identical envelope', async () => {
     const envelopes: any[] = [];
 
     for (const send of [
@@ -178,6 +190,7 @@ describe('SMS payload consistency across every sender', () => {
           type: 'CUSTOMER' as const,
         }),
       () => smsService.sendSms(PHONE, 'transaction recorded'),
+      () => authService.requestOtp(PHONE),
     ]) {
       mockedAxios.post.mockClear();
       await send();
@@ -187,16 +200,6 @@ describe('SMS payload consistency across every sender', () => {
     for (const envelope of envelopes) {
       expect(envelope).toEqual(envelopes[0]);
     }
-  });
-
-  it('OTP does not go out over SMS at all', async () => {
-    // Login codes moved to WhatsApp. If this starts sending again, the code is
-    // travelling over two channels, only one of which is intended.
-    mockedAxios.post.mockClear();
-
-    await authService.requestOtp(PHONE);
-
-    expect(mockedAxios.post).not.toHaveBeenCalled();
   });
 
   describe('failure propagation is preserved per caller', () => {

@@ -8,6 +8,7 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  Put,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -60,5 +61,10 @@ export class UsersController {
       membershipId,
       req.user.sub,
     );
+  }
+
+  @Put('me')
+  updateMe(@Req() req, @Body() body: { name?: string }) {
+    return this.usersService.updateMe(req.user.sub, body.name);
   }
 }

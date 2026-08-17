@@ -7,13 +7,17 @@ jest.mock('axios');
 const mockedAxios = axios as jest.Mocked<typeof axios>;
 
 /**
- * Canonical SMS gateway payload.
+ * The TextBee gateway contract.
  *
- * Two shapes previously targeted the same gateway: this service posted
- * `{ phoneNumber, message }` to the bare SMS_GATEWAY_URL, while the OTP and
- * reminder paths posted `{ phoneNumbers: [...], message }` to `<base>/messages`.
- * The latter is what the working login flow uses, so it is canonical and the
- * assertions below pin it.
+ * This suite previously pinned an earlier, generic-gateway design —
+ * SMS_GATEWAY_URL with Basic Auth, posting `{phoneNumbers, message}` to
+ * `<base>/messages`. That design was superseded by the TextBee integration
+ * (TEXTBEE_API_KEY / TEXTBEE_DEVICE_ID, x-api-key auth, `{receivers,
+ * smsBody}` posted to a fixed per-device TextBee URL) that SmsService
+ * actually implements today. TextBee is the sole SMS/OTP provider — there is
+ * no WhatsApp or other fallback anywhere in this codebase. This rewrite
+ * ports the same assertions (payload shape, target URL, phone
+ * normalisation, auth, timeout, failure handling) onto that real contract.
  */
 describe('SmsService', () => {
   let service: SmsService;
@@ -32,32 +36,33 @@ describe('SmsService', () => {
   beforeEach(async () => {
     jest.clearAllMocks();
     env = {
-      SMS_GATEWAY_URL: 'http://gateway.local:8080',
-      SMS_GATEWAY_USERNAME: 'user',
-      SMS_GATEWAY_PASSWORD: 'pass',
+      TEXTBEE_API_KEY: 'txb_test_key',
+      TEXTBEE_DEVICE_ID: 'device-123',
     };
-    mockedAxios.post.mockResolvedValue({ status: 200 } as any);
+    mockedAxios.post.mockResolvedValue({ status: 200 });
     service = await build();
   });
 
   describe('payload shape', () => {
-    it('posts phoneNumbers[] and message — never the singular phoneNumber', async () => {
+    it("posts receivers[] and smsBody — TextBee's field names, not the generic gateway's", async () => {
       await service.sendSms('9876543210', 'hello');
 
       const [, payload] = mockedAxios.post.mock.calls[0] as any;
       expect(payload).toEqual({
-        phoneNumbers: ['+919876543210'],
-        message: 'hello',
+        receivers: ['+919876543210'],
+        smsBody: 'hello',
       });
-      expect(payload).not.toHaveProperty('phoneNumber');
+      expect(payload).not.toHaveProperty('phoneNumbers');
+      expect(payload).not.toHaveProperty('message');
     });
 
-    it('sends JSON with basic auth and a timeout', async () => {
+    it('sends JSON with the API key header and a timeout — not Basic Auth', async () => {
       await service.sendSms('9876543210', 'hello');
 
       const [, , config] = mockedAxios.post.mock.calls[0] as any;
       expect(config.headers['Content-Type']).toBe('application/json');
-      expect(config.auth).toEqual({ username: 'user', password: 'pass' });
+      expect(config.headers['x-api-key']).toBe('txb_test_key');
+      expect(config.auth).toBeUndefined();
       expect(config.timeout).toBe(5000);
     });
 
@@ -73,14 +78,25 @@ describe('SmsService', () => {
   });
 
   describe('target url', () => {
+    it('is built from TEXTBEE_DEVICE_ID', async () => {
+      await service.sendSms('9876543210', 'hello');
+
+      expect(mockedAxios.post.mock.calls[0][0]).toBe(
+        'https://api.textbee.dev/api/v1/gateway/devices/device-123/send-sms',
+      );
+    });
+
     it.each([
-      ['http://gateway.local:8080', 'http://gateway.local:8080/messages'],
-      ['http://gateway.local:8080/', 'http://gateway.local:8080/messages'],
-      ['http://gateway.local:8080/messages', 'http://gateway.local:8080/messages'],
-      ['http://gateway.local:8080/api', 'http://gateway.local:8080/api/messages'],
-      ['http://gateway.local:8080/api/', 'http://gateway.local:8080/api/messages'],
-    ])('%s -> %s', async (configured, expected) => {
-      env.SMS_GATEWAY_URL = configured;
+      [
+        'device-123',
+        'https://api.textbee.dev/api/v1/gateway/devices/device-123/send-sms',
+      ],
+      [
+        'another-device',
+        'https://api.textbee.dev/api/v1/gateway/devices/another-device/send-sms',
+      ],
+    ])('device id %s -> %s', async (deviceId, expected) => {
+      env.TEXTBEE_DEVICE_ID = deviceId;
       service = await build();
 
       await service.sendSms('9876543210', 'hello');
@@ -102,20 +118,28 @@ describe('SmsService', () => {
       await service.sendSms(input, 'hello');
 
       const [, payload] = mockedAxios.post.mock.calls[0] as any;
-      expect(payload.phoneNumbers).toEqual([expected]);
+      expect(payload.receivers).toEqual([expected]);
     });
 
     it('leaves an already-E.164 foreign number alone', async () => {
       await service.sendSms('+14155550123', 'hello');
 
       const [, payload] = mockedAxios.post.mock.calls[0] as any;
-      expect(payload.phoneNumbers).toEqual(['+14155550123']);
+      expect(payload.receivers).toEqual(['+14155550123']);
     });
   });
 
   describe('failure handling', () => {
-    it('mocks the send when no gateway is configured', async () => {
-      env.SMS_GATEWAY_URL = '';
+    it('mocks the send when TextBee is not configured', async () => {
+      env = {};
+      service = await build();
+
+      await expect(service.sendSms('9876543210', 'hello')).resolves.toBe(true);
+      expect(mockedAxios.post).not.toHaveBeenCalled();
+    });
+
+    it('mocks the send when only one of the two required values is set', async () => {
+      env = { TEXTBEE_API_KEY: 'txb_test_key' };
       service = await build();
 
       await expect(service.sendSms('9876543210', 'hello')).resolves.toBe(true);
@@ -126,6 +150,19 @@ describe('SmsService', () => {
       mockedAxios.post.mockRejectedValue(new Error('ECONNREFUSED'));
 
       await expect(service.sendSms('9876543210', 'hello')).resolves.toBe(false);
+    });
+  });
+
+  describe('isConfigured', () => {
+    it('is true once both TextBee values are set', () => {
+      expect(service.isConfigured()).toBe(true);
+    });
+
+    it('is false when unset', async () => {
+      env = {};
+      service = await build();
+
+      expect(service.isConfigured()).toBe(false);
     });
   });
 });

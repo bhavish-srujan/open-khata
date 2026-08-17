@@ -21,29 +21,12 @@ export class SmsService {
 
   constructor(private configService: ConfigService) {}
 
-  /** True when a gateway is configured; otherwise sends are mocked. */
+  /** True when TextBee is configured; otherwise sends are mocked. */
   isConfigured(): boolean {
-    return !!this.configService.get<string>('SMS_GATEWAY_URL')?.trim();
-  }
-
-  /**
-   * SMS_GATEWAY_URL is a base URL; the gateway exposes /messages. Appends it
-   * unless the configured value already ends there.
-   */
-  buildSmsGatewayUrl(): string {
-    const url = (this.configService.get<string>('SMS_GATEWAY_URL') || '').trim();
-    if (!url) return url;
-    try {
-      const parsed = new URL(url);
-      if (parsed.pathname === '' || parsed.pathname === '/') {
-        parsed.pathname = '/messages';
-      } else if (!parsed.pathname.endsWith('/messages')) {
-        parsed.pathname = parsed.pathname.replace(/\/$/, '') + '/messages';
-      }
-      return parsed.toString();
-    } catch {
-      return url.replace(/\/$/, '') + '/messages';
-    }
+    return (
+      !!this.configService.get<string>('TEXTBEE_API_KEY')?.trim() &&
+      !!this.configService.get<string>('TEXTBEE_DEVICE_ID')?.trim()
+    );
   }
 
   /**
@@ -59,57 +42,67 @@ export class SmsService {
     if (!digits) return raw;
 
     if (digits.length === 10) return `+91${digits}`;
-    if (digits.length === 11 && digits.startsWith('0')) return `+91${digits.slice(1)}`;
+    if (digits.length === 11 && digits.startsWith('0'))
+      return `+91${digits.slice(1)}`;
     if (digits.length === 12 && digits.startsWith('91')) return `+${digits}`;
-    if (digits.length === 13 && digits.startsWith('091')) return `+${digits.slice(1)}`;
+    if (digits.length === 13 && digits.startsWith('091'))
+      return `+${digits.slice(1)}`;
 
     return raw.startsWith('+') ? raw : `+${digits}`;
   }
 
   private get timeoutMs(): number {
-    const raw = Number(this.configService.get<string>('SMS_GATEWAY_TIMEOUT_MS'));
+    const raw = Number(
+      this.configService.get<string>('SMS_GATEWAY_TIMEOUT_MS'),
+    );
     return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_TIMEOUT_MS;
   }
 
   /**
-   * Sends one message. Returns false rather than throwing, because the ledger
-   * and party flows fire this off without awaiting and must not let a gateway
-   * outage roll back a transaction. Callers that need to surface the failure
-   * (OTP, reminders) check the return value.
+   * Sends one message via TextBee API. Returns false rather than throwing.
    */
   async sendSms(phoneNumber: string, message: string): Promise<boolean> {
     if (!this.isConfigured()) {
       this.logger.warn(
-        `SMS gateway URL not configured. Mocking SMS to ${phoneNumber}: ${message}`,
+        `TextBee API not configured. Mocking SMS to ${phoneNumber}: ${message}`,
       );
       return true;
     }
 
-    const targetUrl = this.buildSmsGatewayUrl();
+    const apiKey = this.configService.get<string>('TEXTBEE_API_KEY')?.trim();
+    const deviceId = this.configService
+      .get<string>('TEXTBEE_DEVICE_ID')
+      ?.trim();
+    const targetUrl = `https://api.textbee.dev/api/v1/gateway/devices/${deviceId}/send-sms`;
+
     const payload = {
-      phoneNumbers: [this.normalizeForGateway(phoneNumber)],
-      message,
+      receivers: [this.normalizeForGateway(phoneNumber)],
+      smsBody: message,
     };
 
     try {
-      this.logger.debug(`Sending SMS to ${phoneNumber} via ${targetUrl}`);
+      this.logger.debug(`Sending SMS to ${phoneNumber} via TextBee`);
       const response = await axios.post(targetUrl, payload, {
-        headers: { 'Content-Type': 'application/json' },
-        timeout: this.timeoutMs,
-        auth: {
-          username: this.configService.get<string>('SMS_GATEWAY_USERNAME') || '',
-          password: this.configService.get<string>('SMS_GATEWAY_PASSWORD') || '',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
         },
+        timeout: this.timeoutMs,
       });
 
       this.logger.log(
-        `Successfully sent SMS to ${phoneNumber}. Gateway responded with status: ${response.status}`,
+        `Successfully sent SMS to ${phoneNumber}. TextBee responded with status: ${response.status}`,
       );
       return true;
     } catch (error) {
       const detail =
-        error?.response?.data || error?.code || error?.message || 'unknown error';
-      this.logger.error(`Failed to send SMS to ${phoneNumber}: ${JSON.stringify(detail)}`);
+        error?.response?.data ||
+        error?.code ||
+        error?.message ||
+        'unknown error';
+      this.logger.error(
+        `Failed to send SMS via TextBee to ${phoneNumber}: ${JSON.stringify(detail)}`,
+      );
       return false;
     }
   }

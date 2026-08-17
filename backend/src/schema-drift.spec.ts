@@ -75,9 +75,15 @@ function migrationIdentifiersByTable(): Map<string, Set<string>> {
     record(table, body);
   }
 
-  // ALTER TABLE "x" ADD COLUMN [IF NOT EXISTS] "y" ...
+  // ALTER TABLE "x" ADD [COLUMN] [IF NOT EXISTS] "y" ... — the COLUMN keyword
+  // is optional in Postgres, and this codebase's migrations use both forms
+  // (compare AddBusinessProfileFields's bare `ADD "address" ...` against
+  // SyncMissingSchema's `ADD COLUMN IF NOT EXISTS "receiptUrl"`). The
+  // lookahead requires a quoted identifier immediately after, so this still
+  // does not match `ADD CONSTRAINT "FK_..." FOREIGN KEY ...` — a constraint
+  // name is not a column, and must not be recorded as one.
   for (const [, table, rest] of sql.matchAll(
-    /ALTER TABLE "([a-z_]+)" ADD COLUMN (?:IF NOT EXISTS )?([\s\S]*?)`/g,
+    /ALTER TABLE "([a-z_]+)" ADD (?:COLUMN )?(?:IF NOT EXISTS )?(?=")([\s\S]*?)`/g,
   )) {
     record(table, rest);
   }

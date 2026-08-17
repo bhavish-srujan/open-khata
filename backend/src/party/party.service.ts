@@ -1,4 +1,8 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { Party } from './party.entity';
@@ -24,7 +28,10 @@ export class PartyService {
     private readonly dataSource: DataSource,
   ) {}
 
-  findAll(businessId: string, type?: 'CUSTOMER' | 'SUPPLIER'): Promise<Party[]> {
+  findAll(
+    businessId: string,
+    type?: 'CUSTOMER' | 'SUPPLIER',
+  ): Promise<Party[]> {
     const where: any = { businessId };
     if (type) {
       where.type = type;
@@ -34,7 +41,10 @@ export class PartyService {
 
   async findOne(id: string, businessId: string): Promise<Party> {
     const party = await this.partyRepository.findOneBy({ id, businessId });
-    if (!party) throw new NotFoundException(`Party ${id} not found in business ${businessId}`);
+    if (!party)
+      throw new NotFoundException(
+        `Party ${id} not found in business ${businessId}`,
+      );
     return party;
   }
 
@@ -118,12 +128,48 @@ export class PartyService {
    * entity manager rather than raw SQL so the audit subscriber records each
    * removed ledger entry and bill. Bills are included deliberately: an invoice
    * for a party that no longer exists cannot be rendered or reconciled.
+   *
+   * Concurrency invariant: this acquires the same Party pessimistic_write
+   * lock every LedgerService method acquires before touching that party, and
+   * acquires it before reading any dependent record — not after, like the
+   * cascade below used to. Without the lock, a concurrent
+   * LedgerService.create()/update()/delete() for this party could commit a
+   * new or changed LedgerEntry in the gap between this method's dependent
+   * lookups and its final `manager.remove(party)`, which then failed with an
+   * unhandled foreign_key_violation (ledger_entries.party_id is ON DELETE NO
+   * ACTION) instead of a clean result. With the lock held first, whichever
+   * of this deletion or a concurrent ledger write reaches the row first runs
+   * to completion before the other is even allowed to read: if this deletion
+   * wins, the concurrent write later sees no party and fails with a normal
+   * 404; if the ledger write wins, this deletion's dependent lookups run
+   * only after it commits and so already include whatever it just changed.
    */
   async delete(id: string, businessId: string): Promise<void> {
-    const party = await this.findOne(id, businessId);
+    // Fast existence check before ever opening a transaction, for a plain
+    // 404 on a bogus id. The authoritative check is the locked re-fetch
+    // below — a party removed between the two calls is handled there.
+    await this.findOne(id, businessId);
 
     await this.dataSource.transaction(async (manager) => {
-      const bills = await manager.find(Bill, { where: { partyId: id, businessId } });
+      const party = await manager
+        .createQueryBuilder(Party, 'party')
+        .setLock('pessimistic_write')
+        .where('party.id = :id AND party.business_id = :businessId', {
+          id,
+          businessId,
+        })
+        .getOne();
+
+      if (!party) {
+        // Removed by a concurrent request while we waited for the lock.
+        throw new NotFoundException(
+          `Party ${id} not found in business ${businessId}`,
+        );
+      }
+
+      const bills = await manager.find(Bill, {
+        where: { partyId: id, businessId },
+      });
       if (bills.length) await manager.remove(bills);
 
       // Detach history from the entries first; it also references the party, so
@@ -140,9 +186,17 @@ export class PartyService {
   }
 
   /** Called by LedgerService to atomically update the running balance. We shouldn't use findOne + update to avoid race conditions. */
-  async updateBalance(partyId: string, businessId: string, delta: number): Promise<void> {
+  async updateBalance(
+    partyId: string,
+    businessId: string,
+    delta: number,
+  ): Promise<void> {
     // A better approach for atomicity is using QueryBuilder increment/decrement, but since we use transactions in Ledger, we might just pass the transaction entity manager.
     // However, for MVP, we'll use a direct update with increment.
-    await this.partyRepository.increment({ id: partyId, businessId }, 'currentBalance', delta);
+    await this.partyRepository.increment(
+      { id: partyId, businessId },
+      'currentBalance',
+      delta,
+    );
   }
 }

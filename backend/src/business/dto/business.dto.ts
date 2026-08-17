@@ -24,6 +24,22 @@ export class CreateBusinessDto {
   @IsString()
   @MaxLength(20)
   gstNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  address?: string;
+
+  @IsOptional()
+  @IsString()
+  category?: string;
+
+  @IsOptional()
+  @IsString()
+  bankAccount?: string;
+
+  @IsOptional()
+  @IsString()
+  profileImageUrl?: string;
 }
 
 export class UpdateBusinessDto {
@@ -42,4 +58,20 @@ export class UpdateBusinessDto {
   @IsString()
   @MaxLength(20)
   gstNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  address?: string;
+
+  @IsOptional()
+  @IsString()
+  category?: string;
+
+  @IsOptional()
+  @IsString()
+  bankAccount?: string;
+
+  @IsOptional()
+  @IsString()
+  profileImageUrl?: string;
 }

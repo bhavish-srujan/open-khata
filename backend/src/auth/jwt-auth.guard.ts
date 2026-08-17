@@ -36,17 +36,21 @@ export class JwtAuthGuard implements CanActivate {
     const authHeader: string | undefined = request.headers['authorization'];
 
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      throw new UnauthorizedException('Missing or invalid Authorization header');
+      throw new UnauthorizedException(
+        'Missing or invalid Authorization header',
+      );
     }
 
     const token = authHeader.split(' ')[1];
 
     try {
       const payload = await this.jwtService.verifyAsync(token);
-      
+
       const user = await this.userRepository.findOneBy({ id: payload.sub });
       if (!user || user.sessionVersion !== payload.sessionVersion) {
-        throw new UnauthorizedException('Session expired. Logged in from another device.');
+        throw new UnauthorizedException(
+          'Session expired. Logged in from another device.',
+        );
       }
 
       // Role comes from the membership, not from the token.

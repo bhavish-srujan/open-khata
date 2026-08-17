@@ -1,4 +1,3 @@
-import { WhatsAppService } from '../notifications/whatsapp/whatsapp.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { AuthService } from './auth.service';
 import { getRepositoryToken } from '@nestjs/typeorm';
@@ -9,7 +8,7 @@ import { JwtService } from '@nestjs/jwt';
 import { SmsService } from '../notifications/sms/sms.service';
 
 describe('AuthService', () => {
-  let membershipRole: any = 'OWNER';
+  const membershipRole: any = 'OWNER';
   let service: AuthService;
   const users = [] as any[];
 
@@ -17,19 +16,14 @@ describe('AuthService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         {
-          // AuthService now delivers login codes over WhatsApp.
-          provide: WhatsAppService,
-          useValue: {
-            isConfigured: jest.fn().mockReturnValue(false),
-            sendOtp: jest.fn().mockResolvedValue({ sent: true }),
-          },
-        },
-        {
           // JwtAuthGuard and AuthService both resolve the caller's role from
           // their membership now, so every spec constructing them needs one.
           provide: getRepositoryToken(BusinessMember),
           useValue: {
-            findOneBy: jest.fn(async () => ({ id: 'm-1', role: membershipRole })),
+            findOneBy: jest.fn(async () => ({
+              id: 'm-1',
+              role: membershipRole,
+            })),
             find: jest.fn(async () => [
               { id: 'm-1', businessId: 'biz-1', role: membershipRole },
             ]),
@@ -38,18 +32,39 @@ describe('AuthService', () => {
           },
         },
         AuthService,
-        { provide: getRepositoryToken(User), useValue: {
-          findOneBy: jest.fn((q) => users.find(u => Object.keys(q).every(k => u[k] === q[k]))),
-          find: jest.fn(() => users),
-          create: jest.fn((obj) => obj),
-          save: jest.fn((u) => { if (!u.id) { u.id = 'id-' + Math.random(); users.push(u); } return Promise.resolve(u); }),
-        } },
-        { provide: getRepositoryToken(Business), useValue: { findOneBy: jest.fn(), create: jest.fn(), save: jest.fn() } },
-        { provide: JwtService, useValue: { signAsync: jest.fn().mockResolvedValue('tok') } },
+        {
+          provide: getRepositoryToken(User),
+          useValue: {
+            findOneBy: jest.fn((q) =>
+              users.find((u) => Object.keys(q).every((k) => u[k] === q[k])),
+            ),
+            find: jest.fn(() => users),
+            create: jest.fn((obj) => obj),
+            save: jest.fn((u) => {
+              if (!u.id) {
+                u.id = 'id-' + Math.random();
+                users.push(u);
+              }
+              return Promise.resolve(u);
+            }),
+          },
+        },
+        {
+          provide: getRepositoryToken(Business),
+          useValue: {
+            findOneBy: jest.fn(),
+            create: jest.fn(),
+            save: jest.fn(),
+          },
+        },
+        {
+          provide: JwtService,
+          useValue: { signAsync: jest.fn().mockResolvedValue('tok') },
+        },
         {
           provide: SmsService,
           useValue: {
-            isConfigured: jest.fn().mockReturnValue(false),
+            isConfigured: jest.fn().mockReturnValue(true),
             sendSms: jest.fn().mockResolvedValue(true),
           },
         },
@@ -61,7 +76,12 @@ describe('AuthService', () => {
 
   it('findUserByPhone should match normalized phone', async () => {
     users.length = 0;
-    users.push({ id: '1', phone_number: '+91-6366605032', normalized_phone: '6366605032', name: 'Srujan Traders' });
+    users.push({
+      id: '1',
+      phone_number: '+91-6366605032',
+      normalized_phone: '6366605032',
+      name: 'Srujan Traders',
+    });
 
     const found = await service.findUserByPhone('6366605032');
     expect(found).toBeDefined();
@@ -70,7 +90,12 @@ describe('AuthService', () => {
 
   it('findUserByPhone should reuse same account for different phone formats', async () => {
     users.length = 0;
-    users.push({ id: '1', phone_number: '6366605032', normalized_phone: '6366605032', name: 'Srujan Traders' });
+    users.push({
+      id: '1',
+      phone_number: '6366605032',
+      normalized_phone: '6366605032',
+      name: 'Srujan Traders',
+    });
 
     const found = await service.findUserByPhone('+916366605032');
     expect(found).toBeDefined();
@@ -82,7 +107,7 @@ describe('AuthService', () => {
     users.length = 0;
     users.push({ id: 'u1', phone_number: '6366605032', sessionVersion: 1 });
     await service.logout('u1');
-    const u = users.find(x => x.id === 'u1');
+    const u = users.find((x) => x.id === 'u1');
     expect(u.sessionVersion).toBe(2);
   });
 });

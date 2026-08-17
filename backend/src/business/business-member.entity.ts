@@ -7,6 +7,7 @@ import {
   ManyToOne,
   JoinColumn,
   Unique,
+  Index,
 } from 'typeorm';
 import { Business } from './business.entity';
 import { User } from '../users/user.entity';
@@ -26,6 +27,7 @@ import { UserRole } from '../users/user.entity';
  */
 @Entity('business_members')
 @Unique('UQ_business_members_business_user', ['businessId', 'userId'])
+@Index('IDX_business_members_user', ['userId'])
 export class BusinessMember {
   @PrimaryGeneratedColumn('uuid')
   id: string;

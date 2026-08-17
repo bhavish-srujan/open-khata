@@ -63,6 +63,17 @@ export class BillItemDto {
  * than by the client.
  */
 export class CreateBillDto {
+  /**
+   * Optional client-generated primary key, following the same pattern as
+   * CreatePartyDto/CreateLedgerEntryDto: makes create idempotent so a client
+   * retry after a network timeout (or lost response) returns the original
+   * bill instead of inserting a duplicate — which would otherwise silently
+   * inflate the Sales report, since it sums Bill.totalAmount directly.
+   */
+  @IsOptional()
+  @IsUUID()
+  id?: string;
+
   @IsUUID()
   partyId: string;
 

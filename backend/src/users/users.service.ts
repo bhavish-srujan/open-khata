@@ -33,9 +33,12 @@ export class UsersService {
     const digits = (value || '').replace(/\D/g, '');
     if (!digits) return '';
     if (digits.length === 10) return digits;
-    if (digits.length === 11 && digits.startsWith('0')) return digits.substring(1);
-    if (digits.length === 12 && digits.startsWith('91')) return digits.substring(2);
-    if (digits.length === 13 && digits.startsWith('091')) return digits.substring(3);
+    if (digits.length === 11 && digits.startsWith('0'))
+      return digits.substring(1);
+    if (digits.length === 12 && digits.startsWith('91'))
+      return digits.substring(2);
+    if (digits.length === 13 && digits.startsWith('091'))
+      return digits.substring(3);
     return digits;
   }
 
@@ -86,7 +89,9 @@ export class UsersService {
       throw new BadRequestException('A valid phone number is required');
     }
 
-    let user = await this.userRepository.findOneBy({ normalized_phone: normalized });
+    let user = await this.userRepository.findOneBy({
+      normalized_phone: normalized,
+    });
     if (!user) {
       user = await this.userRepository.save(
         this.userRepository.create({
@@ -104,7 +109,9 @@ export class UsersService {
       userId: user.id,
     });
     if (existing) {
-      throw new BadRequestException('This person is already a member of this business');
+      throw new BadRequestException(
+        'This person is already a member of this business',
+      );
     }
 
     const member = await this.memberRepository.save(
@@ -158,7 +165,18 @@ export class UsersService {
 
   /** The caller's role in a business, or null when they are not a member. */
   async findRole(businessId: string, userId: string): Promise<UserRole | null> {
-    const member = await this.memberRepository.findOneBy({ businessId, userId });
+    const member = await this.memberRepository.findOneBy({
+      businessId,
+      userId,
+    });
     return member?.role ?? null;
+  }
+
+  async updateMe(userId: string, name?: string): Promise<User> {
+    const user = await this.userRepository.findOneBy({ id: userId });
+    if (!user) throw new NotFoundException('User not found');
+
+    if (name !== undefined) user.name = name;
+    return this.userRepository.save(user);
   }
 }

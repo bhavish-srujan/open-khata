@@ -30,13 +30,19 @@ describe('bills', () => {
 
   const parties = [
     { id: PARTY_A, businessId: BUSINESS_A, name: 'Rahul Traders' },
-    { id: PARTY_OTHER_BUSINESS, businessId: 'some-other-business', name: 'Not Yours' },
+    {
+      id: PARTY_OTHER_BUSINESS,
+      businessId: 'some-other-business',
+      name: 'Not Yours',
+    },
   ];
 
   const validBill = () => ({
     partyId: PARTY_A,
     totalAmount: 1250.5,
-    items: [{ description: 'Basmati Rice 5kg', quantity: 2, price: 480, tax: 5 }],
+    items: [
+      { description: 'Basmati Rice 5kg', quantity: 2, price: 480, tax: 5 },
+    ],
     isGst: true,
   });
 
@@ -49,7 +55,9 @@ describe('bills', () => {
           provide: getRepositoryToken(Bill),
           useValue: {
             create: (o: any) => o,
-            save: jest.fn(async (b: any) => (saved.push(b), { id: 'bill-1', ...b })),
+            save: jest.fn(
+              async (b: any) => (saved.push(b), { id: 'bill-1', ...b }),
+            ),
             find: jest.fn(async () => []),
             findOne: jest.fn(async () => null),
           },
@@ -58,10 +66,11 @@ describe('bills', () => {
           provide: getRepositoryToken(Party),
           useValue: {
             // Matches on whichever keys the query carries, like a real repo.
-            findOne: jest.fn(async ({ where }: any) =>
-              parties.find((p) =>
-                Object.entries(where).every(([k, v]) => (p as any)[k] === v),
-              ) ?? null,
+            findOne: jest.fn(
+              async ({ where }: any) =>
+                parties.find((p) =>
+                  Object.entries(where).every(([k, v]) => (p as any)[k] === v),
+                ) ?? null,
             ),
           },
         },
@@ -105,7 +114,10 @@ describe('bills', () => {
     });
 
     it('persists the line items and stamps the business from the token', async () => {
-      await request(app.getHttpServer()).post('/bills').send(validBill()).expect(201);
+      await request(app.getHttpServer())
+        .post('/bills')
+        .send(validBill())
+        .expect(201);
 
       expect(saved[0]).toMatchObject({
         partyId: PARTY_A,
@@ -119,12 +131,16 @@ describe('bills', () => {
     it('treats isGst as optional', async () => {
       const { isGst, ...withoutGst } = validBill();
 
-      await request(app.getHttpServer()).post('/bills').send(withoutGst).expect(201);
+      await request(app.getHttpServer())
+        .post('/bills')
+        .send(withoutGst)
+        .expect(201);
     });
   });
 
   describe('top-level validation', () => {
     it.each([
+      ['non-uuid id', { id: 'not-a-uuid' }, 'id'],
       ['non-uuid partyId', { partyId: 'party-abc' }, 'partyId'],
       ['negative total', { totalAmount: -1 }, 'totalAmount'],
       ['zero total', { totalAmount: 0 }, 'totalAmount'],
@@ -168,7 +184,11 @@ describe('bills', () => {
     const goodItem = { description: 'Rice', quantity: 2, price: 480 };
 
     it.each([
-      ['missing description', { ...goodItem, description: undefined }, 'description'],
+      [
+        'missing description',
+        { ...goodItem, description: undefined },
+        'description',
+      ],
       ['blank description', { ...goodItem, description: '' }, 'description'],
       ['zero quantity', { ...goodItem, quantity: 0 }, 'quantity'],
       ['negative quantity', { ...goodItem, quantity: -1 }, 'quantity'],
@@ -177,7 +197,9 @@ describe('bills', () => {
       ['tax above 100 percent', { ...goodItem, tax: 150 }, 'tax'],
       ['unknown field on the item', { ...goodItem, isAdmin: true }, 'isAdmin'],
     ])('rejects a line item with %s', async (_label, item, field) => {
-      const res = await request(app.getHttpServer()).post('/bills').send(withItem(item));
+      const res = await request(app.getHttpServer())
+        .post('/bills')
+        .send(withItem(item));
 
       expect(res.status).toBe(400);
       expect(JSON.stringify(res.body.message)).toContain(field);
@@ -186,7 +208,10 @@ describe('bills', () => {
     it('rejects a bad item even when another item is valid', async () => {
       const res = await request(app.getHttpServer())
         .post('/bills')
-        .send({ ...validBill(), items: [goodItem, { ...goodItem, price: -1 }] });
+        .send({
+          ...validBill(),
+          items: [goodItem, { ...goodItem, price: -1 }],
+        });
 
       expect(res.status).toBe(400);
       expect(JSON.stringify(res.body.message)).toContain('price');
@@ -194,7 +219,7 @@ describe('bills', () => {
   });
 
   describe('tenancy', () => {
-    it('refuses a bill against another business\'s party', async () => {
+    it("refuses a bill against another business's party", async () => {
       const res = await request(app.getHttpServer())
         .post('/bills')
         .send({ ...validBill(), partyId: PARTY_OTHER_BUSINESS });
@@ -206,7 +231,10 @@ describe('bills', () => {
     it('refuses a bill against a party that does not exist', async () => {
       const res = await request(app.getHttpServer())
         .post('/bills')
-        .send({ ...validBill(), partyId: '44444444-4444-4444-8444-444444444444' });
+        .send({
+          ...validBill(),
+          partyId: '44444444-4444-4444-8444-444444444444',
+        });
 
       expect(res.status).toBe(404);
       expect(saved).toHaveLength(0);

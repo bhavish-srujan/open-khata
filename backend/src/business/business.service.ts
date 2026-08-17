@@ -1,4 +1,8 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { Business } from './business.entity';
@@ -25,7 +29,12 @@ export class BusinessService {
    * Both, together: access is resolved from business_members, so a business
    * created without one would be invisible to the person who just made it.
    */
-  async create(ownerId: string, name: string, type?: string, gstNumber?: string): Promise<Business> {
+  async create(
+    ownerId: string,
+    name: string,
+    type?: string,
+    gstNumber?: string,
+  ): Promise<Business> {
     return this.dataSource.transaction(async (manager) => {
       const business = await manager.save(
         manager.create(Business, { ownerId, name, type, gstNumber }),
@@ -44,29 +53,63 @@ export class BusinessService {
   }
 
   /**
-   * Every business the user can act in, owned or not.
+   * Every business the user can act in, owned or not, together with the
+   * role held in each — the Android client uses this to hide actions a
+   * CASHIER cannot perform (this is a UI convenience only; every mutating
+   * endpoint still re-checks the role itself via RolesGuard).
    *
    * Listing by ownerId alone hid businesses someone had been added to as
    * staff — they could authenticate into one but never see it listed.
    */
-  async findAllForUser(userId: string): Promise<Business[]> {
-    const memberships = await this.dataSource.getRepository(BusinessMember).find({
-      where: { userId },
-      relations: { business: true },
-      order: { createdAt: 'ASC' },
-    });
+  async findAllForUser(
+    userId: string,
+  ): Promise<(Business & { role: UserRole })[]> {
+    const memberships = await this.dataSource
+      .getRepository(BusinessMember)
+      .find({
+        where: { userId },
+        relations: { business: true },
+        order: { createdAt: 'ASC' },
+      });
 
     return memberships
-      .map((m) => m.business)
-      .filter((b): b is Business => !!b);
+      .filter((m): m is BusinessMember & { business: Business } => !!m.business)
+      .map((m) => ({ ...m.business, role: m.role }));
   }
 
   async findOne(id: string, ownerId: string): Promise<Business> {
-    const business = await this.businessRepository.findOne({ where: { id, ownerId } });
+    const business = await this.businessRepository.findOne({
+      where: { id, ownerId },
+    });
     if (!business) {
       throw new NotFoundException('Business not found');
     }
     return business;
+  }
+
+  /**
+   * Resolves a single business for any member — owner or staff — for GET
+   * only. findOne() above stays owner-only because update() and delete()
+   * reuse it as their authorization check; widening findOne() itself to
+   * membership would let a CASHIER edit or delete the business, not just
+   * view it. This mirrors findAllForUser's membership join instead.
+   */
+  async findOneForMember(
+    id: string,
+    userId: string,
+  ): Promise<Business & { role: UserRole }> {
+    const membership = await this.dataSource
+      .getRepository(BusinessMember)
+      .findOne({
+        where: { businessId: id, userId },
+        relations: { business: true },
+      });
+
+    if (!membership?.business) {
+      throw new NotFoundException('Business not found');
+    }
+
+    return { ...membership.business, role: membership.role };
   }
 
   /**
@@ -86,7 +129,15 @@ export class BusinessService {
 
     if (updateData.name !== undefined) business.name = updateData.name;
     if (updateData.type !== undefined) business.type = updateData.type;
-    if (updateData.gstNumber !== undefined) business.gstNumber = updateData.gstNumber;
+    if (updateData.gstNumber !== undefined)
+      business.gstNumber = updateData.gstNumber;
+    if (updateData.address !== undefined) business.address = updateData.address;
+    if (updateData.category !== undefined)
+      business.category = updateData.category;
+    if (updateData.bankAccount !== undefined)
+      business.bankAccount = updateData.bankAccount;
+    if (updateData.profileImageUrl !== undefined)
+      business.profileImageUrl = updateData.profileImageUrl;
 
     return this.businessRepository.save(business);
   }
@@ -108,10 +159,14 @@ export class BusinessService {
 
     const [parties, entries, bills, items, receipts] = await Promise.all([
       this.dataSource.getRepository(Party).count({ where: { businessId: id } }),
-      this.dataSource.getRepository(LedgerEntry).count({ where: { businessId: id } }),
+      this.dataSource
+        .getRepository(LedgerEntry)
+        .count({ where: { businessId: id } }),
       this.dataSource.getRepository(Bill).count({ where: { businessId: id } }),
       this.dataSource.getRepository(Item).count({ where: { businessId: id } }),
-      this.dataSource.getRepository(Receipt).count({ where: { businessId: id } }),
+      this.dataSource
+        .getRepository(Receipt)
+        .count({ where: { businessId: id } }),
     ]);
 
     const held = parties + entries + bills + items + receipts;

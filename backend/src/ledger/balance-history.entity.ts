@@ -1,9 +1,20 @@
-import { Entity, Column, PrimaryGeneratedColumn, CreateDateColumn, ManyToOne, JoinColumn } from 'typeorm';
+import {
+  Entity,
+  Column,
+  PrimaryGeneratedColumn,
+  CreateDateColumn,
+  ManyToOne,
+  JoinColumn,
+  Index,
+} from 'typeorm';
 import { Party } from '../party/party.entity';
 import { LedgerEntry } from './ledger-entry.entity';
 import { Business } from '../business/business.entity';
 
 @Entity('balance_history')
+@Index('IDX_balance_history_business', ['businessId'])
+@Index('IDX_balance_history_party', ['partyId'])
+@Index('IDX_balance_history_ledger_entry', ['ledgerEntryId'])
 export class BalanceHistory {
   @PrimaryGeneratedColumn('uuid')
   id: string;

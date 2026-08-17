@@ -20,7 +20,7 @@ export class BusinessController {
 
   @Get(':id')
   findOne(@Request() req, @Param('id') id: string) {
-    return this.businessService.findOne(id, req.user.sub);
+    return this.businessService.findOneForMember(id, req.user.sub);
   }
 
   @Put(':id')

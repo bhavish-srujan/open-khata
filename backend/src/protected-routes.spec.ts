@@ -2,6 +2,7 @@ import { INestApplication } from '@nestjs/common';
 import { JwtModule, JwtService } from '@nestjs/jwt';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { BusinessMember } from './business/business-member.entity';
+import { Business } from './business/business.entity';
 import { Test, TestingModule } from '@nestjs/testing';
 import request from 'supertest';
 import { InventoryController } from './inventory/inventory.controller';
@@ -60,7 +61,10 @@ describe('reports + inventory route protection', () => {
           // their membership now, so every spec constructing them needs one.
           provide: getRepositoryToken(BusinessMember),
           useValue: {
-            findOneBy: jest.fn(async () => ({ id: 'm-1', role: membershipRole })),
+            findOneBy: jest.fn(async () => ({
+              id: 'm-1',
+              role: membershipRole,
+            })),
             find: jest.fn(async () => [
               { id: 'm-1', businessId: 'biz-1', role: membershipRole },
             ]),
@@ -99,6 +103,12 @@ describe('reports + inventory route protection', () => {
           },
         },
         { provide: PdfService, useValue: {} },
+        {
+          // ReportsController.downloadStatement resolves the real business
+          // name for the PDF header rather than a hardcoded placeholder.
+          provide: getRepositoryToken(Business),
+          useValue: { findOne: jest.fn().mockResolvedValue(null) },
+        },
       ],
     }).compile();
 
@@ -141,7 +151,10 @@ describe('reports + inventory route protection', () => {
     it('returns 401 for a stale sessionVersion (logged in elsewhere)', async () => {
       await request(app.getHttpServer())
         .get('/inventory')
-        .set('Authorization', `Bearer ${tokenFor(UserRole.OWNER, { sessionVersion: 1 })}`)
+        .set(
+          'Authorization',
+          `Bearer ${tokenFor(UserRole.OWNER, { sessionVersion: 1 })}`,
+        )
         .expect(401);
     });
   });

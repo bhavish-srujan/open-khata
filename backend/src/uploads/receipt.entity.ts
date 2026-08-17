@@ -5,6 +5,7 @@ import {
   CreateDateColumn,
   ManyToOne,
   JoinColumn,
+  Index,
 } from 'typeorm';
 import { Business } from '../business/business.entity';
 
@@ -20,6 +21,7 @@ import { Business } from '../business/business.entity';
  * client never supplies a path and directory traversal is not reachable.
  */
 @Entity('receipts')
+@Index('IDX_receipts_business', ['businessId'])
 export class Receipt {
   @PrimaryGeneratedColumn('uuid')
   id: string;

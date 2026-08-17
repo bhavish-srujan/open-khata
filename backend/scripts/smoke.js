@@ -12,7 +12,8 @@
  *                                 database, read-only, to check TLS, schema
  *                                 and required env
  *
- * SMS_GATEWAY_URL is blanked throughout, so nothing reaches a real phone.
+ * TEXTBEE_API_KEY/TEXTBEE_DEVICE_ID are blanked throughout, so nothing
+ * reaches a real phone.
  */
 const fs = require('fs');
 const path = require('path');
@@ -37,7 +38,8 @@ function hostedUrl() {
 async function boot(databaseUrl, nodeEnv) {
   process.env.DATABASE_URL = databaseUrl;
   process.env.NODE_ENV = nodeEnv;
-  process.env.SMS_GATEWAY_URL = '';
+  process.env.TEXTBEE_API_KEY = '';
+  process.env.TEXTBEE_DEVICE_ID = '';
   // Point the real S3 driver at MinIO, so uploads exercise object storage
   // rather than the local-disk fallback.
   if (process.env.SMOKE_S3 !== '0') {

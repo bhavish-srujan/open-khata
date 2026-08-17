@@ -1,9 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { getRepositoryToken } from '@nestjs/typeorm';
 import { ReportsController } from './reports.controller';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { ReportsService } from './reports.service';
 import { PdfService } from './pdf/pdf.service';
+import { Business } from '../business/business.entity';
 
 describe('ReportsController', () => {
   let controller: ReportsController;
@@ -13,7 +15,18 @@ describe('ReportsController', () => {
       controllers: [ReportsController],
       providers: [
         { provide: ReportsService, useValue: {} },
-        { provide: PdfService, useValue: { generateBusinessStatement: jest.fn().mockReturnValue(Buffer.from('')) } },
+        {
+          provide: PdfService,
+          useValue: {
+            generateBusinessStatement: jest
+              .fn()
+              .mockReturnValue(Buffer.from('')),
+          },
+        },
+        {
+          provide: getRepositoryToken(Business),
+          useValue: { findOne: jest.fn().mockResolvedValue(null) },
+        },
       ],
     })
       // Guards referenced by class in @UseGuards are instantiated as enhancers,

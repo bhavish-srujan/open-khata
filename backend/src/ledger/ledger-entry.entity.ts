@@ -5,11 +5,14 @@ import {
   CreateDateColumn,
   ManyToOne,
   JoinColumn,
+  Index,
 } from 'typeorm';
 import { Party } from '../party/party.entity';
 import { Business } from '../business/business.entity';
 
 @Entity('ledger_entries')
+@Index('IDX_ledger_entries_business', ['businessId'])
+@Index('IDX_ledger_entries_party', ['partyId'])
 export class LedgerEntry {
   @PrimaryGeneratedColumn('uuid')
   id: string;
