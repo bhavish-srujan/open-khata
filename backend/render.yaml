@@ -2,7 +2,13 @@ services:
   - type: web
     name: khatabook-backend
     env: node
-    buildCommand: npm install && npm run build
+    # --include=dev is required: NODE_ENV=production is set below, and npm
+    # skips devDependencies on `npm install` whenever NODE_ENV=production is
+    # present in the environment — including during the build step, before
+    # the app itself ever runs. @nestjs/cli (the `nest` binary `npm run
+    # build` invokes) lives in devDependencies, so a plain `npm install`
+    # here silently omits it and the build fails with "nest: not found".
+    buildCommand: npm install --include=dev && npm run build
     startCommand: npm run start:prod
     envVars:
       - key: NODE_ENV
