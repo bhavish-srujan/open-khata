@@ -229,8 +229,12 @@ export class LedgerService {
         });
         await manager.save(history);
 
-        // 6. Send SMS Notification
-        if (party.phone) {
+        // 6. Send SMS Notification — unless the client's own "Send
+        // transaction SMS" toggle was off when this entry was created.
+        // dto.notifyCustomer is only ever explicitly `false`; absent (older
+        // clients) or `true` both mean "send", preserving this method's
+        // previous unconditional behavior for every existing app build.
+        if (party.phone && dto.notifyCustomer !== false) {
           // The business name, not its id. This previously interpolated the raw
           // businessId, so customers received "…3f1a9c22-0000-4000-… gave you".
           const business = await manager.findOne(Business, {

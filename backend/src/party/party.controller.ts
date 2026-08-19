@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Patch,
   Delete,
   Body,
   Param,
@@ -15,6 +16,7 @@ import {
 } from '@nestjs/common';
 import { PartyService } from './party.service';
 import { CreatePartyDto } from './dto/create-party.dto';
+import { UpdatePartyInterestDto } from './dto/update-party-interest.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
@@ -63,6 +65,23 @@ export class PartyController {
   createParty(@Req() req, @Headers() headers, @Body() dto: CreatePartyDto) {
     const businessId = this.extractBusinessId(req, headers);
     return this.partyService.create(businessId, dto);
+  }
+
+  /**
+   * Interest configuration only — see UpdatePartyInterestDto for why nothing
+   * else is editable here. Left open to every business member (unlike
+   * delete): this changes no balance and destroys no record, it only sets the
+   * rate a later, explicit interest charge would use.
+   */
+  @Patch(':id/interest')
+  updatePartyInterest(
+    @Req() req,
+    @Headers() headers,
+    @Param('id') id: string,
+    @Body() dto: UpdatePartyInterestDto,
+  ) {
+    const businessId = this.extractBusinessId(req, headers);
+    return this.partyService.updateInterest(id, businessId, dto);
   }
 
   /**

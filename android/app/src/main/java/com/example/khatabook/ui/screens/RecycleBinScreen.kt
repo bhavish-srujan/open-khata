@@ -52,8 +52,11 @@ fun RecycleBinScreen(
                 modifier = Modifier.fillMaxWidth().navigationBarsPadding()
             ) {
                 Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+                    val context = androidx.compose.ui.platform.LocalContext.current
                     BounceOutlinedButton(
-                        onClick = { },
+                        onClick = { 
+                            android.widget.Toast.makeText(context, "Coming soon", android.widget.Toast.LENGTH_SHORT).show()
+                        },
                         shape = RoundedCornerShape(8.dp),
                         colors = ButtonDefaults.outlinedButtonColors(containerColor = Color.White),
                         border = androidx.compose.foundation.BorderStroke(1.dp, KhatabookGiveRed),

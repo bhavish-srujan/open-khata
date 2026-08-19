@@ -7,8 +7,10 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Store
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -21,21 +23,52 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.example.khatabook.ui.theme.*
 import kotlinx.coroutines.delay
 
+enum class AccountTransitionMode {
+    BUSINESS_SWITCH,
+    ACCOUNT_SWITCH,
+    LOGOUT,
+}
+
+/**
+ * Full-screen, non-dismissible overlay shown while a business switch, account
+ * switch, or logout is actually happening.
+ *
+ * This used to be business-switch-only, on a fixed timer (400ms + 450ms)
+ * unconnected to the real [repository work][isOperationComplete] — the
+ * "success" phase always fired on the clock, whether or not the underlying
+ * switch had actually finished, and its copy hardcoded "Account Switched!"
+ * even though only a business had changed. That made every business switch
+ * visually read as an account switch, and meant the screen behind the overlay
+ * could already be showing the *old* business/account's data by the time the
+ * fake "success" fired.
+ *
+ * Now the spinner phase lasts exactly as long as the real operation takes —
+ * [isOperationComplete] is flipped by the caller only after the actual
+ * suspend call (switchBusiness / switchUser+loadBusinesses / logout) returns.
+ * Only then does the brief, fixed-duration success flourish run, purely for
+ * legibility (a checkmark that appeared and vanished in the same frame would
+ * be worse UX than a short, deliberate pause) — never a substitute for the
+ * real work.
+ */
 @Composable
 fun BusinessSwitchingOverlay(
-    targetBusinessName: String,
-    onAnimationComplete: () -> Unit
+    mode: AccountTransitionMode,
+    targetLabel: String,
+    isOperationComplete: Boolean,
+    onFinished: () -> Unit
 ) {
     var isSuccessPhase by remember { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) {
-        delay(400)
-        isSuccessPhase = true
-        delay(450)
-        onAnimationComplete()
+    LaunchedEffect(isOperationComplete) {
+        if (isOperationComplete) {
+            isSuccessPhase = true
+            delay(450)
+            onFinished()
+        }
     }
 
     val scaleAnimate by animateFloatAsState(
@@ -44,7 +77,16 @@ fun BusinessSwitchingOverlay(
         label = "accountSwitchPulse"
     )
 
-    Dialog(onDismissRequest = {}) {
+    val (inProgressText, successText, targetIcon) = when (mode) {
+        AccountTransitionMode.BUSINESS_SWITCH -> Triple("Switching Business...", "Business Switched!", Icons.Default.Store)
+        AccountTransitionMode.ACCOUNT_SWITCH -> Triple("Switching Account...", "Account Switched!", Icons.Default.Person)
+        AccountTransitionMode.LOGOUT -> Triple("Logging Out...", "Logged Out", Icons.AutoMirrored.Filled.Logout)
+    }
+
+    Dialog(
+        onDismissRequest = {},
+        properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false)
+    ) {
         Card(
             modifier = Modifier
                 .fillMaxWidth(0.9f)
@@ -94,42 +136,46 @@ fun BusinessSwitchingOverlay(
                 Spacer(modifier = Modifier.height(16.dp))
 
                 Text(
-                    text = if (isSuccessPhase) "Account Switched!" else "Switching Business Account...",
+                    text = if (isSuccessPhase) successText else inProgressText,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold,
                     color = KhatabookTextDark
                 )
 
-                Spacer(modifier = Modifier.height(4.dp))
+                if (targetLabel.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(4.dp))
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Store, contentDescription = null, tint = KhatabookHeaderBlue, modifier = Modifier.size(15.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = targetBusinessName,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = KhatabookHeaderBlue
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(targetIcon, contentDescription = null, tint = KhatabookHeaderBlue, modifier = Modifier.size(15.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = targetLabel,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = KhatabookHeaderBlue
+                        )
+                    }
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
+                if (mode != AccountTransitionMode.LOGOUT) {
+                    Spacer(modifier = Modifier.height(12.dp))
 
-                Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(Color(0xFFF8FAFC))
-                        .padding(horizontal = 12.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(Icons.Default.Lock, contentDescription = null, tint = KhatabookTextMuted, modifier = Modifier.size(12.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = "100% Isolated & Private Account Data",
-                        fontSize = 10.sp,
-                        color = KhatabookTextMuted,
-                        fontWeight = FontWeight.SemiBold
-                    )
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(Color(0xFFF8FAFC))
+                            .padding(horizontal = 12.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Lock, contentDescription = null, tint = KhatabookTextMuted, modifier = Modifier.size(12.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "100% Isolated & Private Account Data",
+                            fontSize = 10.sp,
+                            color = KhatabookTextMuted,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
                 }
             }
         }

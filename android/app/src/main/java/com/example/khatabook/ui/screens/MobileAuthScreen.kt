@@ -25,6 +25,7 @@ import com.example.khatabook.ui.theme.*
 import kotlinx.coroutines.launch
 import android.app.Activity
 import androidx.compose.ui.platform.LocalContext
+import com.example.khatabook.BuildConfig
 import com.example.khatabook.data.repository.KhatabookRepository
 
 
@@ -32,7 +33,7 @@ import com.example.khatabook.data.repository.KhatabookRepository
 @Composable
 fun MobileAuthScreen(
     onBackClick: () -> Unit,
-    onSendOtp: (phoneNumber: String, verificationId: String) -> Unit,
+    onSendOtp: (phoneNumber: String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var phoneNumber by remember { mutableStateOf("") }
@@ -40,7 +41,9 @@ fun MobileAuthScreen(
     var isLoading by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
-    val repository = remember { KhatabookRepository(context) }
+    // Developer settings (gear icon + server URL dialog) are debug-only.
+    // This also avoids creating a duplicate KhatabookRepository in release builds (F-03/B-04).
+    val repository = if (BuildConfig.DEBUG) remember { KhatabookRepository(context) } else null
     var showSettingsDialog by remember { mutableStateOf(false) }
 
     Scaffold(
@@ -53,8 +56,10 @@ fun MobileAuthScreen(
                     }
                 },
                 actions = {
-                    BounceIconButton(onClick = { showSettingsDialog = true }) {
-                        Icon(Icons.Default.Settings, contentDescription = "Settings", tint = Color.White)
+                    if (BuildConfig.DEBUG) {
+                        BounceIconButton(onClick = { showSettingsDialog = true }) {
+                            Icon(Icons.Default.Settings, contentDescription = "Settings", tint = Color.White)
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = KhatabookHeaderBlue)
@@ -160,9 +165,9 @@ fun MobileAuthScreen(
                                 val request = com.example.khatabook.data.api.RequestOtpRequest(fullPhone)
                                 val response = NetworkClient.apiService.requestOtp(request)
                                 if (response.isSuccessful && response.body()?.success == true) {
-                                    onSendOtp(fullPhone, "dummy_verification_id")
+                                    onSendOtp(fullPhone)
                                 } else {
-                                    errorMessage = response.errorBody()?.string() ?: "Failed to send OTP"
+                                    errorMessage = com.example.khatabook.utils.parseApiErrorMessage(response.errorBody()?.string(), "Failed to send OTP")
                                 }
                             } catch (e: Exception) {
                                 errorMessage = "Network error: ${e.message}"
@@ -211,7 +216,7 @@ fun MobileAuthScreen(
             )
         }
         
-        if (showSettingsDialog) {
+        if (BuildConfig.DEBUG && showSettingsDialog && repository != null) {
             var newUrl by remember { mutableStateOf(repository.getServerUrl()) }
             AlertDialog(
                 onDismissRequest = { showSettingsDialog = false },

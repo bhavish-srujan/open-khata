@@ -18,9 +18,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -32,17 +30,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.khatabook.ui.theme.*
-
-private val sampleContacts = listOf(
-    ContactItem("c1", "Aakash Sharma", "+91 98111 22334", "AS", Color(0xFFEF4444)),
-    ContactItem("c2", "Ankit Patel", "+91 97222 33445", "AP", Color(0xFF3B82F6)),
-    ContactItem("c3", "Bhavna Gupta", "+91 99333 44556", "BG", Color(0xFF10B981)),
-    ContactItem("c4", "Deepak Verma", "+91 98444 55667", "DV", Color(0xFFF59E0B)),
-    ContactItem("c5", "Gaurav Singh", "+91 97555 66778", "GS", Color(0xFF8B5CF6)),
-    ContactItem("c6", "Harish Kumar", "+91 99666 77889", "HK", Color(0xFFEC4899)),
-    ContactItem("c7", "Karan Malhotra", "+91 98777 88990", "KM", Color(0xFF06B6D4)),
-    ContactItem("c8", "Manish Joshi", "+91 97888 99001", "MJ", Color(0xFF84CC16))
-)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -135,36 +122,10 @@ fun StaffContactPickerScreen(
                     contentPadding = PaddingValues(vertical = 12.dp)
                 ) {
                     item {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { }
-                                .padding(vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(42.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(0xFFEFF6FF)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(Icons.Default.Add, contentDescription = null, tint = KhatabookHeaderBlue)
-                            }
-
-                            Spacer(modifier = Modifier.width(12.dp))
-
-                            Text(
-                                text = "Add New Staff",
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = KhatabookHeaderBlue,
-                                modifier = Modifier.weight(1f)
-                            )
-
-                            Icon(Icons.Default.KeyboardArrowRight, contentDescription = null, tint = KhatabookHeaderBlue)
-                        }
-
+                        // "Add New Staff" manual-entry row removed: this screen
+                        // has no manual phone-number-entry form/dialog behind
+                        // it, only the device-contact list below, so the row
+                        // did nothing when tapped.
                         HorizontalDivider(color = KhatabookBorderLight)
                     }
 
@@ -174,6 +135,8 @@ fun StaffContactPickerScreen(
                                 CircularProgressIndicator(color = KhatabookHeaderBlue)
                             }
                         }
+                    } else if (!permissionGranted) {
+                        item { ContactsPermissionDeniedNotice(context) }
                     }
 
                     items(filteredContacts) { contact ->

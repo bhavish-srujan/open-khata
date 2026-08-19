@@ -16,9 +16,9 @@ import androidx.core.content.ContextCompat
  * them to press send. On a busy counter that is unusable: adding a transaction
  * meant leaving the ledger, sending, and navigating back.
  *
- * Login codes do not come through here — those go over WhatsApp from the
- * server. This is only for balance updates and collection reminders, which
- * must reach customers who may not use WhatsApp at all.
+ * Login codes do not come through here — those go over TextBee (SMS) from the
+ * server, not through this on-device sender. This is only for balance
+ * updates and collection reminders.
  */
 object SmsSender {
 
@@ -36,19 +36,51 @@ object SmsSender {
             PackageManager.PERMISSION_GRANTED
 
     @Suppress("DEPRECATION")
-    private fun smsManager(context: Context): SmsManager =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+    private fun smsManager(context: Context, businessId: String): SmsManager {
+        val prefs = context.getSharedPreferences("sms_settings", Context.MODE_PRIVATE)
+        // Business-scoped, matching what SmsSettingsScreen actually saves
+        // ("sim_index_$bizId" on Save) — this used to read the bare, never-written
+        // "sim_index" key, so picking a non-default SIM in Settings had no effect;
+        // every send silently used the device default regardless.
+        val simIndex = prefs.getInt("sim_index_$businessId", 0) // 0=Default, 1=SIM1, 2=SIM2
+
+        if (simIndex > 0) {
+            try {
+                if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED) {
+                    val subManager = context.getSystemService(android.telephony.SubscriptionManager::class.java)
+                    val activeSubs = subManager.activeSubscriptionInfoList
+                    if (activeSubs != null && activeSubs.size >= simIndex) {
+                        val subInfo = activeSubs[simIndex - 1] // 1 maps to index 0 (SIM1)
+                        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                            context.getSystemService(SmsManager::class.java).createForSubscriptionId(subInfo.subscriptionId)
+                        } else {
+                            SmsManager.getSmsManagerForSubscriptionId(subInfo.subscriptionId)
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to get SmsManager for SIM index $simIndex", e)
+            }
+        }
+
+        // Fallback to default
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             context.getSystemService(SmsManager::class.java)
         } else {
             SmsManager.getDefault()
         }
+    }
 
     /**
      * Sends [message] to [phoneNumber], returning why it failed rather than
      * throwing: a notification that cannot be delivered must never take down
      * the ledger write that triggered it.
+     *
+     * [businessId] selects the SIM configured for that business in SMS
+     * Settings; blank falls back to the device default SIM (correct for any
+     * call site not yet threading a business id through).
      */
-    fun send(context: Context, phoneNumber: String, message: String): Result {
+    fun send(context: Context, phoneNumber: String, message: String, businessId: String = ""): Result {
         if (!hasPermission(context)) {
             return Result.PermissionMissing
         }
@@ -59,7 +91,7 @@ object SmsSender {
         }
 
         return try {
-            val manager = smsManager(context)
+            val manager = smsManager(context, businessId)
             // Long messages must be split, or the send silently truncates.
             val parts = manager.divideMessage(message)
             if (parts.size > 1) {

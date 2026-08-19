@@ -25,32 +25,18 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.khatabook.ui.components.bounceClick
 import com.example.khatabook.ui.theme.*
 
 /** Builds the full list of runtime permissions based on the device's Android version. */
 fun buildRuntimePermissions(): Array<String> {
     val perms = mutableListOf(
         Manifest.permission.READ_CONTACTS,
-        Manifest.permission.WRITE_CONTACTS,
-        Manifest.permission.CALL_PHONE,
-        Manifest.permission.READ_CALL_LOG,
-        Manifest.permission.READ_PHONE_STATE,
-        Manifest.permission.ACCESS_FINE_LOCATION,
-        Manifest.permission.ACCESS_COARSE_LOCATION,
         Manifest.permission.SEND_SMS,
-        Manifest.permission.READ_SMS,
-        Manifest.permission.RECEIVE_SMS,
+        Manifest.permission.READ_PHONE_STATE,
         Manifest.permission.CAMERA,
-        Manifest.permission.RECORD_AUDIO,
     )
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {          // Android 13+
         perms.add(Manifest.permission.POST_NOTIFICATIONS)
-        perms.add(Manifest.permission.NEARBY_WIFI_DEVICES)
-    }
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {                 // Android 12+
-        perms.add(Manifest.permission.BLUETOOTH_SCAN)
-        perms.add(Manifest.permission.BLUETOOTH_CONNECT)
     }
     return perms.toTypedArray()
 }
@@ -65,15 +51,9 @@ private data class PermissionGroup(
 private val permissionGroups = listOf(
     PermissionGroup(
         icon = Icons.Default.Group,
-        title = "Contacts & Calls",
-        description = "Access contacts to add customers instantly and make direct calls from the app.",
+        title = "Contacts",
+        description = "Access contacts to add customers instantly from your phonebook.",
         accentColor = KhatabookHeaderBlue
-    ),
-    PermissionGroup(
-        icon = Icons.Default.LocationOn,
-        title = "Location",
-        description = "Detect your business location to auto-fill addresses and enable nearby features.",
-        accentColor = KhatabookGreen
     ),
     PermissionGroup(
         icon = Icons.Default.Sms,
@@ -89,8 +69,8 @@ private val permissionGroups = listOf(
     ),
     PermissionGroup(
         icon = Icons.Default.CameraAlt,
-        title = "Camera & Microphone",
-        description = "Scan ledger sheets with AI, capture payment proofs, and use voice entry.",
+        title = "Camera",
+        description = "Scan ledger sheets with AI and capture payment proofs.",
         accentColor = KhatabookHeaderBlue
     )
 )

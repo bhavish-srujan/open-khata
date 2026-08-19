@@ -21,9 +21,28 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.example.khatabook.ui.theme.*
 
+/**
+ * Resolves what to show for one account row: its own stored name, trimmed,
+ * or a safe generic fallback — never another account's name, never the raw
+ * phone number, and never a fabricated name. [accountNames] is keyed by
+ * exact phone number, so a lookup for one phone can never return a value
+ * stored under a different one; a phone missing from the map (or mapped to
+ * blank/whitespace) falls back to [fallback].
+ */
+internal fun resolveAccountDisplayName(
+    phone: String,
+    accountNames: Map<String, String>,
+    fallback: String = "User Account"
+): String = accountNames[phone]?.trim()?.takeIf { it.isNotBlank() } ?: fallback
+
 @Composable
 fun MultiSessionAccountSwitcherDialog(
     phoneNumbers: List<String>,
+    /** Each phone's stored display name (e.g. via the "user_name" per-account
+     *  preference) — a phone missing here, or mapped to a blank string, falls
+     *  back to a generic label rather than ever showing another account's
+     *  name or the phone number itself as a name. */
+    accountNames: Map<String, String> = emptyMap(),
     activePhoneNumber: String,
     onPhoneSelect: (String) -> Unit,
     onAddNewAccount: () -> Unit,
@@ -54,6 +73,7 @@ fun MultiSessionAccountSwitcherDialog(
                 // Account List
                 phoneNumbers.forEach { phone ->
                     val isSelected = phone == activePhoneNumber
+                    val displayName = resolveAccountDisplayName(phone, accountNames)
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -84,7 +104,7 @@ fun MultiSessionAccountSwitcherDialog(
                         Spacer(modifier = Modifier.width(12.dp))
 
                         Column(modifier = Modifier.weight(1f)) {
-                            Text("User Account", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = KhatabookTextDark)
+                            Text(displayName, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = KhatabookTextDark)
                             Text(phone, fontSize = 11.sp, color = KhatabookTextMuted)
                         }
 

@@ -54,9 +54,15 @@ describe('PartyService — client-supplied ids', () => {
           provide: getRepositoryToken(Party),
           useValue: {
             create: (obj: Partial<Party>) => Object.assign(new Party(), obj),
+            // Upsert-by-id, matching TypeORM's real save(): saving an entity
+            // that already has a stored primary key updates that row rather
+            // than inserting a second one. A push-only double would make an
+            // edit look like an insert and hide double-write bugs.
             save: jest.fn(async (p: Party) => {
               p.id = p.id ?? `server-generated-${rows.length}`;
-              rows.push(p);
+              const existing = rows.findIndex((r) => r.id === p.id);
+              if (existing >= 0) rows[existing] = p;
+              else rows.push(p);
               return p;
             }),
             findOneBy: async (where: any) =>
@@ -143,5 +149,87 @@ describe('PartyService — client-supplied ids', () => {
 
     expect(party.id).toBe(CLIENT_ID);
     expect(rows).toHaveLength(1);
+  });
+
+  /**
+   * Interest configuration is editable after creation. The invariant that
+   * matters: this never moves money — currentBalance is the ledger's, and an
+   * interest *charge* is a separate explicit ledger entry.
+   */
+  describe('updateInterest', () => {
+    const interestOn = {
+      interestEnabled: true,
+      interestRate: 5,
+      interestPeriodValue: 100,
+      interestPeriodUnit: 'DAYS' as const,
+    };
+
+    it('stores the supplied interest configuration', async () => {
+      await service.create(BUSINESS_A, { ...dto, id: CLIENT_ID });
+
+      const updated = await service.updateInterest(
+        CLIENT_ID,
+        BUSINESS_A,
+        interestOn,
+      );
+
+      expect(updated.interestEnabled).toBe(true);
+      expect(updated.interestRate).toBe(5);
+      expect(updated.interestPeriodValue).toBe(100);
+      expect(updated.interestPeriodUnit).toBe('DAYS');
+    });
+
+    it('zeroes the rate and period when interest is turned off', async () => {
+      await service.create(BUSINESS_A, { ...dto, id: CLIENT_ID });
+      await service.updateInterest(CLIENT_ID, BUSINESS_A, interestOn);
+
+      const off = await service.updateInterest(CLIENT_ID, BUSINESS_A, {
+        interestEnabled: false,
+      });
+
+      // No stale rate left behind that a later bug could read as live.
+      expect(off.interestEnabled).toBe(false);
+      expect(off.interestRate).toBe(0);
+      expect(off.interestPeriodValue).toBe(0);
+    });
+
+    it('never touches the running balance', async () => {
+      const created = await service.create(BUSINESS_A, { ...dto, id: CLIENT_ID });
+      created.currentBalance = 1000;
+
+      const updated = await service.updateInterest(
+        CLIENT_ID,
+        BUSINESS_A,
+        interestOn,
+      );
+
+      expect(Number(updated.currentBalance)).toBe(1000);
+    });
+
+    it('is idempotent — replaying the same edit converges', async () => {
+      await service.create(BUSINESS_A, { ...dto, id: CLIENT_ID });
+
+      await service.updateInterest(CLIENT_ID, BUSINESS_A, interestOn);
+      const replay = await service.updateInterest(
+        CLIENT_ID,
+        BUSINESS_A,
+        interestOn,
+      );
+
+      expect(replay.interestRate).toBe(5);
+      expect(rows).toHaveLength(1);
+    });
+
+    it('refuses to edit a party belonging to another business', async () => {
+      await service.create(BUSINESS_A, { ...dto, id: CLIENT_ID });
+
+      const attempt = service.updateInterest(
+        CLIENT_ID,
+        BUSINESS_B,
+        interestOn,
+      );
+
+      await expect(attempt).rejects.toThrow(/not found/i);
+    });
   });
 });

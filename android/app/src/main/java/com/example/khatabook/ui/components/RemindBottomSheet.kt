@@ -20,8 +20,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.border
 import com.example.khatabook.data.model.Party
 import com.example.khatabook.ui.theme.KhatabookHeaderBlue
-import com.example.khatabook.ui.theme.KhatabookGiveRed
-import com.example.khatabook.ui.theme.KhatabookGotGreen
 import com.example.khatabook.ui.theme.KhatabookTextDark
 import com.example.khatabook.ui.theme.KhatabookTextMuted
 
@@ -31,7 +29,8 @@ fun RemindBottomSheet(
     party: Party,
     onDismiss: () -> Unit,
     onSmsClick: () -> Unit,
-    onWhatsappClick: () -> Unit
+    onWhatsappClick: () -> Unit,
+    onSendBulkReminders: () -> Unit = {}
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -115,7 +114,7 @@ fun RemindBottomSheet(
                         )
                         Spacer(modifier = Modifier.height(12.dp))
                         BounceButton(
-                            onClick = { /* TODO */ },
+                            onClick = onSendBulkReminders,
                             colors = ButtonDefaults.buttonColors(containerColor = KhatabookHeaderBlue),
                             shape = RoundedCornerShape(6.dp),
                             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),

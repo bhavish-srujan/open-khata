@@ -128,8 +128,16 @@ fun AboutUsScreen(
 
 @Composable
 fun AboutLinkCard(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     Card(
-        modifier = Modifier.fillMaxWidth().bounceClick { },
+        // No real Terms of Service/Privacy Policy destination exists anywhere in
+        // this app yet — previously this tapped to an empty lambda with no
+        // feedback at all. Matches RecycleBinScreen/ViewReportsScreen's own
+        // established "Coming soon" pattern for not-yet-implemented destinations,
+        // rather than inventing a URL that doesn't exist.
+        modifier = Modifier.fillMaxWidth().bounceClick {
+            android.widget.Toast.makeText(context, "Coming soon", android.widget.Toast.LENGTH_SHORT).show()
+        },
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)

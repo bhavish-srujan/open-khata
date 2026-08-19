@@ -42,7 +42,6 @@ import com.example.khatabook.data.model.LedgerEntry
 import com.example.khatabook.data.model.Party
 import com.example.khatabook.data.model.TransactionType
 import com.example.khatabook.ui.components.EntryDetailsDialog
-import com.example.khatabook.ui.components.ItemPopIn
 import com.example.khatabook.ui.components.LedgerEntryCard
 import com.example.khatabook.ui.components.RemindBottomSheet
 import com.example.khatabook.ui.components.bounceClick
@@ -60,6 +59,9 @@ fun CustomerLedgerScreen(
     onEditEntry: (entryId: String, newAmount: Double, newNote: String) -> Unit = { _, _, _ -> },
     onDeleteEntry: (entryId: String) -> Unit = {},
     onViewProfileClick: () -> Unit = {},
+    onSendBulkReminders: () -> Unit = {},
+    /** OWNER/MANAGER only, matching the server's own restriction on edit/delete. */
+    canManageLedgerEntries: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     // Removed redundant BackHandler; MainActivity handles navStack popping centrally
@@ -264,7 +266,7 @@ fun CustomerLedgerScreen(
                             // Sent directly rather than opening the Messages app,
                             // which used to throw the user out of the ledger.
                             val message = "Dear ${party.name}, your total outstanding balance is ₹ $balanceAmount. Please clear your dues on Khatabook."
-                            when (val result = SmsSender.send(context, party.phone, message)) {
+                            when (val result = SmsSender.send(context, party.phone, message, party.businessId)) {
                                 is SmsSender.Result.Sent ->
                                     Toast.makeText(context, "Reminder sent to ${party.name}", Toast.LENGTH_SHORT).show()
                                 is SmsSender.Result.PermissionMissing ->
@@ -318,7 +320,7 @@ fun CustomerLedgerScreen(
             onSmsClick = {
                 run {
                     val message = "Dear ${party.name}, your total outstanding balance is ₹ ${kotlin.math.abs(party.currentBalance).toInt()}. Please clear your dues on Khatabook."
-                    when (val result = SmsSender.send(context, party.phone, message)) {
+                    when (val result = SmsSender.send(context, party.phone, message, party.businessId)) {
                         is SmsSender.Result.Sent ->
                             Toast.makeText(context, "Reminder sent", Toast.LENGTH_SHORT).show()
                         is SmsSender.Result.PermissionMissing ->
@@ -339,6 +341,10 @@ fun CustomerLedgerScreen(
                     Toast.makeText(context, "WhatsApp not found", Toast.LENGTH_SHORT).show()
                 }
                 showRemindBottomSheet = false
+            },
+            onSendBulkReminders = {
+                onSendBulkReminders()
+                showRemindBottomSheet = false
             }
         )
     }
@@ -347,6 +353,7 @@ fun CustomerLedgerScreen(
     if (showAddEntryDialog) {
         var amountText by remember { mutableStateOf("") }
         var noteText by remember { mutableStateOf("") }
+        var amountError by remember { mutableStateOf<String?>(null) }
 
         AlertDialog(
             onDismissRequest = { showAddEntryDialog = false },
@@ -361,13 +368,17 @@ fun CustomerLedgerScreen(
                 Column {
                     OutlinedTextField(
                         value = amountText,
-                        onValueChange = { amountText = it },
+                        onValueChange = { amountText = it; amountError = null },
                         label = { Text("Amount (₹)") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         singleLine = true,
+                        isError = amountError != null,
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(8.dp)
                     )
+                    if (amountError != null) {
+                        Text(amountError!!, color = KhatabookGiveRed, fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp))
+                    }
 
                     Spacer(modifier = Modifier.height(10.dp))
 
@@ -379,27 +390,24 @@ fun CustomerLedgerScreen(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(8.dp)
                     )
-                }
+}
             },
             confirmButton = {
                 BounceButton(
                     onClick = {
-                        val amount = amountText.toDoubleOrNull() ?: 0.0
-                        if (amount > 0) {
-                            onAddEntry(party.id, amount, selectedEntryType, noteText)
-                            showAddEntryDialog = false
+                        val amount = amountText.toDoubleOrNull()
+                        when {
+                            amount == null -> amountError = "Enter a valid amount"
+                            amount <= 0 -> amountError = "Amount must be greater than zero"
+                            else -> {
+                                onAddEntry(party.id, amount, selectedEntryType, noteText)
+                                showAddEntryDialog = false
+                            }
                         }
                     },
                     colors = ButtonDefaults.buttonColors(
                         containerColor = if (selectedEntryType == TransactionType.GAVE) KhatabookGiveRed else KhatabookGotGreen
-                    ),
-                    modifier = Modifier.bounceClick {
-                        val amount = amountText.toDoubleOrNull() ?: 0.0
-                        if (amount > 0) {
-                            onAddEntry(party.id, amount, selectedEntryType, noteText)
-                            showAddEntryDialog = false
-                        }
-                    }
+                    )
                 ) {
                     Text("Save Transaction")
                 }
@@ -600,7 +608,8 @@ fun CustomerLedgerScreen(
                 onDeleteEntry = { entryId ->
                     onDeleteEntry(entryId)
                     selectedEntryForDetails = null
-                }
+                },
+                canManage = canManageLedgerEntries
             )
         }
     }

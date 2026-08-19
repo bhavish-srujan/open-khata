@@ -11,6 +11,7 @@ import { Bill } from '../bills/entities/bill.entity';
 import { LedgerEntry } from '../ledger/ledger-entry.entity';
 import { BalanceHistory } from '../ledger/balance-history.entity';
 import { CreatePartyDto } from './dto/create-party.dto';
+import { UpdatePartyInterestDto } from './dto/update-party-interest.dto';
 import { SmsService } from '../notifications/sms/sms.service';
 
 /** Postgres unique_violation. */
@@ -65,6 +66,12 @@ export class PartyService {
       gstin: dto.gstin,
       businessId,
       currentBalance: 0,
+      interestEnabled: dto.interestEnabled ?? false,
+      interestRate: dto.interestEnabled ? dto.interestRate : 0,
+      interestPeriodValue: dto.interestEnabled ? dto.interestPeriodValue : 0,
+      interestPeriodUnit: dto.interestEnabled
+        ? dto.interestPeriodUnit
+        : 'DAYS',
     });
 
     let savedParty: Party;
@@ -95,6 +102,40 @@ export class PartyService {
     }
 
     return savedParty;
+  }
+
+  /**
+   * Replaces a party's interest configuration.
+   *
+   * Naturally idempotent: this assigns absolute values rather than applying a
+   * delta, so a retried send from the offline Outbox converges on exactly the
+   * same row. Touching only the four interest columns leaves currentBalance —
+   * and therefore every ledger invariant — untouched by construction; interest
+   * only becomes money when a ledger entry is created for it, which is a
+   * separate, explicit operation.
+   *
+   * Disabling interest zeroes the other three fields rather than preserving
+   * them, so a party that is off can never carry a stale rate that a later
+   * bug could read as live.
+   */
+  async updateInterest(
+    id: string,
+    businessId: string,
+    dto: UpdatePartyInterestDto,
+  ): Promise<Party> {
+    // Scoped find: a party in another business 404s rather than being edited.
+    const party = await this.findOne(id, businessId);
+
+    party.interestEnabled = dto.interestEnabled;
+    party.interestRate = dto.interestEnabled ? (dto.interestRate ?? 0) : 0;
+    party.interestPeriodValue = dto.interestEnabled
+      ? (dto.interestPeriodValue ?? 0)
+      : 0;
+    party.interestPeriodUnit = dto.interestEnabled
+      ? (dto.interestPeriodUnit ?? 'DAYS')
+      : 'DAYS';
+
+    return this.partyRepository.save(party);
   }
 
   /**

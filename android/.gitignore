@@ -17,6 +17,10 @@ local.properties
 # Signing material — never commit
 *.jks
 *.keystore
+keystore.properties
+# Renamed/retired keystores (e.g. keystore.jks.old-unknown-password) don't
+# match *.jks once suffixed, so catch them explicitly.
+*.old-unknown-password
 
 # Build outputs
 /app/release/

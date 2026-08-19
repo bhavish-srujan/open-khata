@@ -2,6 +2,7 @@ package com.example.khatabook
 
 import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.result.contract.ActivityResultContracts
 import com.example.khatabook.utils.SmsSender
@@ -19,14 +20,15 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import com.example.khatabook.data.api.NetworkClient
 import com.example.khatabook.data.model.BusinessAccount
-import com.example.khatabook.data.model.CollectionFrequency
 import com.example.khatabook.data.model.Party
-import com.example.khatabook.data.model.PartyType
-import com.example.khatabook.data.model.TransactionType
 import com.example.khatabook.data.repository.KhatabookRepository
 import com.example.khatabook.ui.components.BusinessSwitcherDialog
 import com.example.khatabook.ui.components.BusinessSwitchingOverlay
@@ -37,11 +39,11 @@ import com.example.khatabook.ui.components.ProfileLockVerificationDialog
 import com.example.khatabook.ui.screens.AboutUsScreen
 import com.example.khatabook.ui.screens.AddPartyScreen
 import com.example.khatabook.ui.screens.AddStaffScreen
-import com.example.khatabook.ui.screens.AppLanguage
 import com.example.khatabook.ui.screens.AppLockScreen
 import com.example.khatabook.ui.screens.BackupInfoScreen
 import com.example.khatabook.ui.screens.BillsScreen
 import com.example.khatabook.ui.screens.BusinessStatisticsScreen
+import com.example.khatabook.ui.screens.CashbookReportScreen
 import com.example.khatabook.ui.screens.CashbookScreen
 import com.example.khatabook.ui.screens.CustomerContactPickerScreen
 import com.example.khatabook.ui.screens.CustomerLedgerScreen
@@ -58,7 +60,6 @@ import com.example.khatabook.ui.screens.PermissionsScreen
 import com.example.khatabook.ui.screens.RecycleBinScreen
 import com.example.khatabook.ui.screens.SetCollectionDateScreen
 import com.example.khatabook.ui.screens.SettingsScreen
-import com.example.khatabook.ui.screens.SingleCustomerReportScreen
 import com.example.khatabook.ui.screens.SmsSettingsScreen
 import com.example.khatabook.ui.screens.StaffContactPickerScreen
 import com.example.khatabook.ui.screens.UserDetailsScreen
@@ -143,9 +144,9 @@ enum class AppScreen {
     CUSTOMER_CONTACT_PICKER,
     ADD_PARTY,
     CASHBOOK,
+    CASHBOOK_REPORT,
     VIEW_REPORTS,
     BUSINESS_STATISTICS,
-    SINGLE_CUSTOMER_REPORT,
     MORE,
     SETTINGS,
     SMS_SETTINGS,
@@ -162,6 +163,13 @@ enum class AppScreen {
     EDIT_PROFILE
 }
 
+/** Lets [AppScreen]'s back stack survive process death via rememberSaveable. */
+private val navStackSaver = androidx.compose.runtime.saveable.listSaver<
+    androidx.compose.runtime.snapshots.SnapshotStateList<AppScreen>, String>(
+    save = { stack -> stack.map { it.name } },
+    restore = { saved -> saved.map { AppScreen.valueOf(it) }.toMutableStateList() }
+)
+
 class MainActivity : AppCompatActivity() {
 
     private lateinit var repository: KhatabookRepository
@@ -175,25 +183,22 @@ class MainActivity : AppCompatActivity() {
      */
     private fun requestSmsPermissionOnce() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
-        if (SmsSender.hasPermission(this)) return
-
-        val alreadyAsked = getSharedPreferences("khatabook_repository_prefs", MODE_PRIVATE)
-            .getBoolean("sms_permission_requested", false)
-        if (alreadyAsked) return
-
-        getSharedPreferences("khatabook_repository_prefs", MODE_PRIVATE)
-            .edit().putBoolean("sms_permission_requested", true).apply()
-
-        registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
-            .launch(Manifest.permission.SEND_SMS)
+        val missingPermissions = mutableListOf<String>()
+        if (checkSelfPermission(Manifest.permission.SEND_SMS) != PackageManager.PERMISSION_GRANTED) {
+            missingPermissions.add(Manifest.permission.SEND_SMS)
+        }
+        if (checkSelfPermission(Manifest.permission.READ_PHONE_STATE) != PackageManager.PERMISSION_GRANTED) {
+            missingPermissions.add(Manifest.permission.READ_PHONE_STATE)
+        }
+        
+        if (missingPermissions.isNotEmpty()) {
+            requestPermissions(missingPermissions.toTypedArray(), 101)
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
-        // Prevent screenshots and screen recording
-        // window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
-
         repository = KhatabookRepository(applicationContext)
 
         // Ask for SMS once, at startup, rather than at each send. Customer
@@ -248,9 +253,14 @@ class MainActivity : AppCompatActivity() {
                         mutableStateOf(prefs.getBoolean("is_logged_in", false))
                     }
 
-                    // True Multi-Level Nested Backstack
-                    val navStack = remember {
-                        mutableStateListOf<AppScreen>(
+                    // True Multi-Level Nested Backstack.
+                    // rememberSaveable (not plain remember) so the user's place
+                    // in the app survives process death — the far more common
+                    // trigger being backgrounding under memory pressure, not
+                    // just rotation — instead of always bouncing back to
+                    // Parties/Language Selection.
+                    val navStack = rememberSaveable(saver = navStackSaver) {
+                        mutableStateListOf(
                             if (isUserLoggedIn) AppScreen.PARTIES else AppScreen.LANGUAGE_SELECTION
                         )
                     }
@@ -272,16 +282,29 @@ class MainActivity : AppCompatActivity() {
                     fun navigateBack() {
                         if (navStack.size > 1) {
                             navStack.removeAt(navStack.size - 1)
+                        } else if (currentScreen == AppScreen.MORE) {
+                            // MORE is reached by clearing the stack (see navigateTo's
+                            // Parties<->More tab-switch special case), so it is always
+                            // alone at size 1 — the same size a truly rootless stack
+                            // would be. Without this, back from the More tab fell
+                            // through to the OS default and exited the app instead of
+                            // returning to Parties, the actual home screen.
+                            navStack.clear()
+                            navStack.add(AppScreen.PARTIES)
+                        } else {
+                            this@MainActivity.finish()
                         }
                     }
 
                     // HARDWARE SYSTEM BACK HANDLER - POPS PREVIOUS SCREEN IN NESTED STACK
-                    BackHandler(enabled = navStack.size > 1) {
+                    BackHandler(enabled = navStack.size > 1 || currentScreen == AppScreen.MORE) {
                         navigateBack()
                     }
 
                     val parties by repository.parties.collectAsState()
                     val entries by repository.ledgerEntries.collectAsState()
+                    val failedOperationCount by repository.failedOperationCountFlow.collectAsState()
+                    val isRestoringFromCloud by repository.isRestoringFromCloud.collectAsState()
 
                     fun normalizePhoneForKey(value: String): String {
                         val digits = value.replace(Regex("\\D"), "")
@@ -311,8 +334,10 @@ class MainActivity : AppCompatActivity() {
                     }
                     var staffRefreshKey by remember { mutableStateOf(0) }
                     var staffResultMessage by remember { mutableStateOf<String?>(null) }
-                    var phoneNumberToVerify by remember { mutableStateOf("") }
-                    var firebaseVerificationId by remember { mutableStateOf("") }
+                    // Saveable: navStack can restore straight onto OTP_VERIFICATION
+                    // after process death, and this is the phone number that screen
+                    // verifies against.
+                    var phoneNumberToVerify by rememberSaveable { mutableStateOf("") }
 
                     fun userPrefKey(key: String, phone: String?): String {
                         return if (!phone.isNullOrBlank()) "${key}_$phone" else key
@@ -346,15 +371,107 @@ class MainActivity : AppCompatActivity() {
                     }
 
                     var userName by remember(authenticatedPhone) { mutableStateOf(getUserPref("user_name", authenticatedPhone, "User")) }
-                    var activePartyForLedger by remember { mutableStateOf<Party?>(null) }
+                    // Saveable, not plain remember: navStack itself survives process
+                    // death (see navStackSaver above) and can restore straight onto
+                    // CUSTOMER_LEDGER/CUSTOMER_PROFILE. A plain remember here would
+                    // reset to null on that restore, silently falling back to
+                    // parties.firstOrNull() below — showing whichever party happens
+                    // to sort first, not the one the user actually had open, with a
+                    // new transaction then posting against the wrong customer.
+                    var activePartyId by rememberSaveable { mutableStateOf<String?>(null) }
 
                     // App Lock State
-                    var isAppLockEnabled by remember { mutableStateOf(prefs.getBoolean("app_lock_enabled", false)) }
-                    var appLockPin by remember { mutableStateOf(prefs.getString("app_lock_pin", "1234") ?: "1234") }
+                    var isAppLockEnabled by remember(authenticatedPhone) { mutableStateOf(prefs.getBoolean("app_lock_enabled_$authenticatedPhone", false)) }
+                    var appLockPin by remember(authenticatedPhone) { mutableStateOf(prefs.getString("app_lock_pin_$authenticatedPhone", "") ?: "") }
                     var isAppUnlocked by remember { mutableStateOf(false) }
 
-                    var activeBusinessId by remember { mutableStateOf("biz_1") }
+                    // Re-lock on backgrounding, not only on process death. Without
+                    // this, isAppUnlocked stayed true for the rest of the Activity's
+                    // life once entered correctly once — App Lock's entire purpose is
+                    // keeping someone else who picks up the phone out, and the Home
+                    // button/app switcher (no process death) is the far more common
+                    // way that happens, not a killed process.
+                    val lifecycleOwner = LocalLifecycleOwner.current
+                    DisposableEffect(lifecycleOwner, isAppLockEnabled) {
+                        val observer = LifecycleEventObserver { _, event ->
+                            if (event == Lifecycle.Event.ON_STOP && isAppLockEnabled) {
+                                isAppUnlocked = false
+                            }
+                        }
+                        lifecycleOwner.lifecycle.addObserver(observer)
+                        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+                    }
+
                     var showBusinessSwitcher by remember { mutableStateOf(false) }
+
+                    // Account/business/logout transition overlay state. These three
+                    // transitions each get their own overlay instance, all driven by real
+                    // suspend work — not a fixed timer — and all declared at this top level
+                    // (rather than inside whichever screen's `when` branch triggers them) so
+                    // their LaunchedEffects survive navStack.clear() tearing down the screen
+                    // that started them. A rememberCoroutineScope() tied to that screen would
+                    // be cancelled the instant that happens (see
+                    // KhatabookRepository.applyPendingBusinessProfile for the same failure
+                    // mode caught elsewhere: a fast local PATCH can still land, but the
+                    // follow-up refresh that updates on-screen state never runs).
+                    val switcherScope = rememberCoroutineScope()
+                    var switchingBusinessTarget by remember { mutableStateOf<BusinessAccount?>(null) }
+                    var businessSwitchComplete by remember { mutableStateOf(false) }
+                    var pendingBusinessLockTarget by remember { mutableStateOf<Pair<BusinessAccount, String>?>(null) }
+                    var switchingAccountTarget by remember { mutableStateOf<String?>(null) }
+                    var accountSwitchComplete by remember { mutableStateOf(false) }
+                    var isLoggingOut by remember { mutableStateOf(false) }
+                    var logoutComplete by remember { mutableStateOf(false) }
+
+                    val transitionInProgress = switchingBusinessTarget != null || switchingAccountTarget != null || isLoggingOut
+
+                    LaunchedEffect(switchingBusinessTarget) {
+                        val biz = switchingBusinessTarget ?: return@LaunchedEffect
+                        repository.switchBusiness(biz.id)
+                        businessSwitchComplete = true
+                    }
+
+                    LaunchedEffect(switchingAccountTarget) {
+                        val phone = switchingAccountTarget ?: return@LaunchedEffect
+                        // Must happen before repository.switchUser()/loadBusinesses() below,
+                        // and before any suspension point in this effect: NetworkClient's
+                        // tokenProvider reads auth_phone on every single request to decide
+                        // whose JWT to send, while businessIdProvider reads
+                        // repository.currentBusinessId() — which switchUser() updates
+                        // immediately. Writing auth_phone here too (rather than only in the
+                        // overlay's onFinished, once the switch is visually complete) keeps
+                        // both in lockstep for every request this effect makes. Previously
+                        // there was a window where a request went out carrying the OUTGOING
+                        // account's token together with the INCOMING account's business id —
+                        // a pairing the backend's membership check (JwtAuthGuard) correctly
+                        // rejects with 401 "You no longer have access to this business."
+                        // NetworkClient's global 401 handler (see the sessionExpired
+                        // LaunchedEffect near updateLoginState) then read that as "this
+                        // session is dead" and deleted the OUTGOING account's own — perfectly
+                        // valid — stored token, so switching accounts could silently sign a
+                        // second account out and later demand OTP again to return to it.
+                        prefs.edit().putString("auth_phone", phone).apply()
+                        repository.switchUser(phone)
+                        // Also await the network refresh, so the overlay does not clear onto
+                        // an empty/stale business list for the newly-active account.
+                        repository.loadBusinesses()
+                        // A no-op if this account already completed a cloud restore on
+                        // this device; otherwise rebuilds its local parties/ledger from
+                        // PostgreSQL — an account switched into for the first time on
+                        // this device must not land on an empty Parties screen.
+                        repository.restoreFromCloudIfNeeded()
+                        accountSwitchComplete = true
+                    }
+
+                    LaunchedEffect(isLoggingOut) {
+                        if (!isLoggingOut) return@LaunchedEffect
+                        // Revoke first, while the token is still present for the interceptor
+                        // to send. Best effort — if offline, the local credential is cleared
+                        // regardless.
+                        runCatching { NetworkClient.apiService.logout() }
+                        clearSession(prefs, authenticatedPhone, loggedInPhones)
+                        logoutComplete = true
+                    }
 
                     // Profile lock PIN per business, keyed by the real business
                     // UUID and persisted. It was held in a remember{} keyed by an
@@ -390,8 +507,30 @@ class MainActivity : AppCompatActivity() {
                             name = getUserPref("business_name", authenticatedPhone, "My Business"),
                         )
 
+                    // UI-only gating: the server (RolesGuard) is the actual
+                    // authority and re-checks every one of these on every
+                    // request regardless of what this hides or shows. A null
+                    // role (not yet loaded) is treated as permissive rather
+                    // than restrictive, so a legitimate OWNER/MANAGER is
+                    // never wrongly blocked while the businesses list is
+                    // still loading — the worst case is identical to the
+                    // status quo before this existed.
+                    val currentRole = activeBusinessFromRepo?.role
+                    val canManageParty = currentRole != "CASHIER"
+                    val canManageLedgerEntries = currentRole != "CASHIER"
+                    val canManageStaff = currentRole != "CASHIER"
+                    val canManageInventory = currentRole != "CASHIER"
+                    val isBusinessOwner = currentRole == null || currentRole == "OWNER"
+
                     // Load them once the user is known, and again when the
-                    // account changes.
+                    // account changes. A remembered-or-first business is
+                    // already selected synchronously inside the repository's
+                    // loadData() (from cache) the moment switchUser() runs, so
+                    // this only needs to refresh from the network — there is
+                    // no longer a separate "pick businesses.first() if nothing
+                    // is selected yet" effect here: that used to race the
+                    // repository's own remembered-business selection, with
+                    // whichever finished last silently overriding the other.
                     LaunchedEffect(authenticatedPhone) {
                         if (authenticatedPhone.isNotBlank()) {
                             repository.loadBusinesses()
@@ -404,9 +543,30 @@ class MainActivity : AppCompatActivity() {
                         mutableStateOf(availableLanguages.find { it.id == savedLangId } ?: availableLanguages[0])
                     }
 
+                    // Saveable: navStack can restore straight onto ADD_PARTY after
+                    // process death, and these are what pre-fill it from the contact
+                    // picker.
+                    var addPartyInitialName by rememberSaveable { mutableStateOf("") }
+                    var addPartyInitialPhone by rememberSaveable { mutableStateOf("") }
+
                     fun updateLoginState(loggedIn: Boolean) {
                         isUserLoggedIn = loggedIn
                         prefs.edit().putBoolean("is_logged_in", loggedIn).apply()
+                    }
+
+                    // Centralized 401 handling: any endpoint (outside /auth/)
+                    // refusing the current token means the session is dead —
+                    // clear it and return to login from one place, rather
+                    // than each screen deciding for itself what a 401 means.
+                    LaunchedEffect(Unit) {
+                        NetworkClient.sessionExpired.collect {
+                            if (isUserLoggedIn) {
+                                clearSession(prefs, authenticatedPhone, loggedInPhones)
+                                updateLoginState(false)
+                                navStack.clear()
+                                navStack.add(AppScreen.MOBILE_AUTH)
+                            }
+                        }
                     }
 
                     if (isAppLockEnabled && !isAppUnlocked) {
@@ -426,8 +586,16 @@ class MainActivity : AppCompatActivity() {
                                                 navStack.clear()
                                                 navStack.add(AppScreen.PARTIES)
                                             } else {
-                                                // Show permissions onboarding before mobile auth
-                                                navigateTo(AppScreen.PERMISSIONS)
+                                                // Only first-run needs the permissions screen. Without this
+                                                // check, a returning user (e.g. after an explicit logout, which
+                                                // clears isUserLoggedIn but not permissions_shown) saw it again
+                                                // on every re-login even though Android already has their answer.
+                                                val permissionsAlreadyShown = prefs.getBoolean("permissions_shown", false)
+                                                if (!permissionsAlreadyShown) {
+                                                    navigateTo(AppScreen.PERMISSIONS)
+                                                } else {
+                                                    navigateTo(AppScreen.MOBILE_AUTH)
+                                                }
                                             }
                                         }
                                     )
@@ -452,9 +620,8 @@ class MainActivity : AppCompatActivity() {
                                 AppScreen.MOBILE_AUTH -> {
                                     MobileAuthScreen(
                                         onBackClick = { navigateBack() },
-                                        onSendOtp = { phone, verId ->
+                                        onSendOtp = { phone ->
                                             phoneNumberToVerify = phone
-                                            firebaseVerificationId = verId
                                             navigateTo(AppScreen.OTP_VERIFICATION)
                                         }
                                     )
@@ -464,7 +631,6 @@ class MainActivity : AppCompatActivity() {
                                     val coroutineScope = rememberCoroutineScope()
                                     OtpVerificationScreen(
                                         phoneNumber = phoneNumberToVerify,
-                                        verificationId = firebaseVerificationId,
                                         onBackClick = { navigateBack() },
                                         onVerifySuccess = { accessToken, isNewUser ->
                                             val normalizedPhone = normalizePhoneForKey(phoneNumberToVerify)
@@ -495,11 +661,23 @@ class MainActivity : AppCompatActivity() {
                                             updateLoginState(true)
                                             // Pull the latest party list from the server
                                             coroutineScope.launch {
-                                                // Deliver anything queued while
-                                                // signed out before pulling, so
-                                                // the merge sees an accurate
+                                                // A fresh token can turn a
+                                                // previously session-expired
+                                                // failure into a deliverable
+                                                // one, so give those another
+                                                // shot before the normal
+                                                // flush, then pull, so the
+                                                // merge sees an accurate
                                                 // picture of what is unsynced.
+                                                repository.retryFailedOperations()
                                                 repository.flushOutbox()
+                                                // A no-op if this account already completed
+                                                // a cloud restore on this device before —
+                                                // otherwise rebuilds the local database from
+                                                // PostgreSQL (fresh install / cleared storage /
+                                                // new device). See restoreFromCloudIfNeeded()
+                                                // and PartiesScreen's isRestoringFromCloud check.
+                                                repository.restoreFromCloudIfNeeded()
                                                 repository.syncPartiesFromServer()
                                             }
                                             navStack.clear()
@@ -518,11 +696,30 @@ class MainActivity : AppCompatActivity() {
                                         onDetailsSubmitted = { name, bizName, category ->
                                             userName = name
                                             setUserPref("user_name", authenticatedPhone, name)
+                                            // Persists to the server's own User.name column — the
+                                            // signal AuthService.verifyOtp's is_new_user actually
+                                            // checks. Without this, is_new_user stays true forever
+                                            // for this account (nothing else ever wrote it), so a
+                                            // reinstall/cleared app — which wipes the local
+                                            // "hasSavedProfile" flag above — would route a genuine
+                                            // returning user back through registration. See
+                                            // applyPendingUserName's doc comment.
+                                            repository.applyPendingUserName(name)
                                             updateLoginState(true)
                                             if (bizName.isNotBlank()) {
                                                 // Kept for the pre-login placeholder; the
                                                 // authoritative name is the server's.
                                                 setUserPref("business_name", authenticatedPhone, bizName)
+                                                // verifyOtp auto-provisions a business named
+                                                // "My Khata Business" for new users — apply what
+                                                // was actually typed here so it isn't silently
+                                                // discarded. Runs on the repository's own
+                                                // long-lived scope, NOT rememberCoroutineScope():
+                                                // the navStack.clear() below tears down this
+                                                // composable immediately, which would cancel a
+                                                // UI-scoped coroutine before the post-update
+                                                // refresh finishes (see applyPendingBusinessProfile).
+                                                repository.applyPendingBusinessProfile(bizName, category)
                                             }
                                             navStack.clear()
                                             // Show permissions after user details if not already shown
@@ -543,26 +740,18 @@ class MainActivity : AppCompatActivity() {
                                         businesses = businesses,
                                         selectedBusinessId = selectedBusinessId,
                                         profileLocksMap = profileLocksMap,
-                                        onBusinessSelected = { biz ->
-                                            partiesScope.launch { repository.switchBusiness(biz.id) }
-                                        },
-                                        onAddNewBusinessClick = {
-                                            // Created server-side so it has a real id and an
-                                            // owner membership; the repository switches to it.
-                                            partiesScope.launch {
-                                                repository.createBusiness(
-                                                    "Shop ${businesses.size + 1}",
-                                                    "Retail Store",
-                                                )
-                                            }
-                                        },
+                                        isRestoringFromCloud = isRestoringFromCloud,
+                                        // Opens the existing BusinessSwitcherDialog below, which already
+                                        // handles selection (with profile-lock verification) and creating
+                                        // a new business — this was previously unreachable from any screen.
+                                        onBusinessHeaderClick = { showBusinessSwitcher = true },
                                         onAddPartyClick = { navigateTo(AppScreen.CUSTOMER_CONTACT_PICKER) },
                                         onCashbookClick = { navigateTo(AppScreen.CASHBOOK) },
                                         onViewReportsClick = { navigateTo(AppScreen.VIEW_REPORTS) },
                                         onBusinessStatisticsClick = { navigateTo(AppScreen.BUSINESS_STATISTICS) },
                                         onMoreTabClick = { navigateTo(AppScreen.MORE) },
                                         onPartyClick = { selectedParty ->
-                                            activePartyForLedger = selectedParty
+                                            activePartyId = selectedParty.id
                                             navigateTo(AppScreen.CUSTOMER_LEDGER)
                                         },
                                         onDeleteParty = { partyId ->
@@ -570,14 +759,30 @@ class MainActivity : AppCompatActivity() {
                                         },
                                         onSheetRecordBulkSync = { records, date ->
                                             records.forEach { rec ->
-                                                repository.addOrUpdateSheetRecord(rec.customerCodeOrName, rec.amountCollected, date, selectedBusinessId)
+                                                repository.addOrUpdateSheetRecord(
+                                                    customerCodeOrName = rec.customerCodeOrName,
+                                                    amountCollected = rec.amountCollected,
+                                                    date = date,
+                                                    businessId = selectedBusinessId,
+                                                    isNewCustomer = rec.isNewCustomer,
+                                                    newPhone = rec.newPhone,
+                                                    newAddress = rec.newAddress
+                                                )
+                                            }
+                                        },
+                                        canManageParty = canManageParty,
+                                        failedOperationCount = failedOperationCount,
+                                        onRetryFailedOperations = {
+                                            partiesScope.launch {
+                                                repository.retryFailedOperations()
+                                                repository.flushOutbox()
                                             }
                                         }
                                     )
                                 }
 
                                 AppScreen.CUSTOMER_LEDGER -> {
-                                    val currentParty = activePartyForLedger ?: parties.firstOrNull() ?: Party(id = "cust_1", name = "Customer", phone = "+91 99999 88888")
+                                    val currentParty = parties.find { it.id == activePartyId } ?: parties.firstOrNull() ?: Party(id = "cust_1", name = "Customer", phone = "+91 99999 88888")
                                     val updatedParty = parties.find { it.id == currentParty.id } ?: currentParty
 
                                     // syncLedgerEntriesFromServer existed but was
@@ -604,14 +809,19 @@ class MainActivity : AppCompatActivity() {
                                         onDeleteEntry = { entryId ->
                                             repository.deleteLedgerEntry(entryId)
                                         },
-                                        onViewProfileClick = { navigateTo(AppScreen.CUSTOMER_PROFILE) }
+                                        onViewProfileClick = { navigateTo(AppScreen.CUSTOMER_PROFILE) },
+                                        onSendBulkReminders = {
+                                            val message = "Dear ${updatedParty.name}, your total outstanding balance is ₹ ${kotlin.math.abs(updatedParty.currentBalance).toInt()}. Please clear your dues on Khatabook."
+                                            SmsSender.send(context, updatedParty.phone, message, updatedParty.businessId)
+                                        },
+                                        canManageLedgerEntries = canManageLedgerEntries
                                     )
                                 }
 
                                 AppScreen.CUSTOMER_PROFILE -> {
-                                    val currentParty = activePartyForLedger ?: parties.firstOrNull() ?: Party(id = "cust_1", name = "Customer", phone = "+91 99999 88888")
+                                    val currentParty = parties.find { it.id == activePartyId } ?: parties.firstOrNull() ?: Party(id = "cust_1", name = "Customer", phone = "+91 99999 88888")
                                     val updatedParty = parties.find { it.id == currentParty.id } ?: currentParty
-                                    
+
                                     com.example.khatabook.ui.screens.CustomerProfileScreen(
                                         party = updatedParty,
                                         onBackClick = { navigateBack() },
@@ -619,42 +829,52 @@ class MainActivity : AppCompatActivity() {
                                             repository.deleteParty(partyId)
                                             navStack.removeAll { it == AppScreen.CUSTOMER_PROFILE || it == AppScreen.CUSTOMER_LEDGER }
                                             if (navStack.isEmpty()) navStack.add(AppScreen.PARTIES)
-                                        }
+                                        },
+                                        onUpdateInterest = { enabled, rate, periodValue, unit ->
+                                            repository.updatePartyInterest(updatedParty.id, enabled, rate, periodValue, unit)
+                                        },
+                                        onApplyInterest = {
+                                            repository.applyInterest(updatedParty.id)?.amount
+                                        },
+                                        canManageParty = canManageParty
                                     )
                                 }
 
                                 AppScreen.CUSTOMER_CONTACT_PICKER -> {
                                     CustomerContactPickerScreen(
                                         onBackClick = { navigateBack() },
-                                        onAddCustomerManualClick = { navigateTo(AppScreen.ADD_PARTY) },
-                                        onContactSelectConfirmed = { contact, frequency, amountGiven ->
-                                            val newParty = repository.addParty(
-                                                name = contact.name,
-                                                phone = contact.phone,
-                                                type = PartyType.CUSTOMER,
-                                                frequency = frequency,
-                                                businessId = selectedBusinessId
-                                            )
-                                            if (amountGiven > 0) {
-                                                repository.addLedgerEntry(newParty.id, amountGiven, TransactionType.GAVE, "Opening Balance Given")
-                                            }
-                                            navStack.clear()
-                                            navStack.add(AppScreen.PARTIES)
+                                        onAddCustomerManualClick = { 
+                                            addPartyInitialName = ""
+                                            addPartyInitialPhone = ""
+                                            navigateTo(AppScreen.ADD_PARTY) 
+                                        },
+                                        onContactSelectConfirmed = { contact, _, _ ->
+                                            addPartyInitialName = contact.name
+                                            addPartyInitialPhone = contact.phone
+                                            navigateTo(AppScreen.ADD_PARTY)
                                         }
                                     )
                                 }
 
                                 AppScreen.ADD_PARTY -> {
                                     AddPartyScreen(
+                                        initialName = addPartyInitialName,
+                                        initialPhone = addPartyInitialPhone,
+                                        existingParties = parties.filter { it.businessId == selectedBusinessId },
                                         onBackClick = { navigateBack() },
-                                        onSaveParty = { name, phone, type, freq, gstin, flat, area, pincode, city, state, isSame ->
+                                        onSaveParty = { name, phone, type, freq, gstin, flat, area, pincode, city, state, isSame,
+                                                        interestEnabled, interestRate, interestPeriodValue, interestPeriodUnit ->
                                             repository.addParty(
                                                 name = name,
                                                 phone = phone,
                                                 type = type,
                                                 address = flat,
                                                 frequency = freq,
-                                                businessId = selectedBusinessId
+                                                businessId = selectedBusinessId,
+                                                interestEnabled = interestEnabled,
+                                                interestRate = interestRate,
+                                                interestPeriodValue = interestPeriodValue,
+                                                interestPeriodUnit = interestPeriodUnit
                                             )
                                             navStack.clear()
                                             navStack.add(AppScreen.PARTIES)
@@ -664,33 +884,36 @@ class MainActivity : AppCompatActivity() {
 
                                 AppScreen.CASHBOOK -> {
                                     CashbookScreen(
-                                        onBackClick = { navigateBack() }
+                                        onBackClick = { navigateBack() },
+                                        parties = parties.filter { it.businessId == selectedBusinessId },
+                                        onAddEntry = { partyId, amount, type, note ->
+                                            repository.addLedgerEntry(partyId, amount, type, note)
+                                        },
+                                        onViewReportClick = { navigateTo(AppScreen.CASHBOOK_REPORT) },
+                                        repository = repository
+                                    )
+                                }
+
+                                AppScreen.CASHBOOK_REPORT -> {
+                                    CashbookReportScreen(
+                                        onBackClick = { navigateBack() },
+                                        businessName = activeBusiness.name,
+                                        repository = repository
                                     )
                                 }
 
                                 AppScreen.VIEW_REPORTS -> {
                                     ViewReportsScreen(
-                                        onBackClick = { navigateBack() }
+                                        onBackClick = { navigateBack() },
+                                        repository = repository
                                     )
                                 }
 
                                 AppScreen.BUSINESS_STATISTICS -> {
                                     BusinessStatisticsScreen(
-                                        onBackClick = { navigateBack() }
+                                        onBackClick = { navigateBack() },
+                                        repository = repository
                                     )
-                                }
-
-                                AppScreen.SINGLE_CUSTOMER_REPORT -> {
-                                    if (activePartyForLedger != null) {
-                                        val currentParty = parties.find { it.id == activePartyForLedger?.id } ?: activePartyForLedger!!
-                                        SingleCustomerReportScreen(
-                                            party = currentParty,
-                                            entries = entries,
-                                            onBackClick = { navigateBack() }
-                                        )
-                                    } else {
-                                        navigateBack()
-                                    }
                                 }
 
                                 AppScreen.MORE -> {
@@ -703,7 +926,6 @@ class MainActivity : AppCompatActivity() {
                                         onSmsSettingsClick = { navigateTo(AppScreen.SMS_SETTINGS) },
                                         onSwitchAccountClick = { showAccountSwitcher = true },
                                         onChangeLanguageClick = { navigateTo(AppScreen.LANGUAGE_SELECTION) },
-                                        onReAuthenticateClick = { navigateTo(AppScreen.MOBILE_AUTH) },
                                         onEditProfileClick = { navigateTo(AppScreen.EDIT_PROFILE) },
                                         onBillsClick = { navigateTo(AppScreen.BILLS) },
                                         onItemsClick = { navigateTo(AppScreen.ITEMS) },
@@ -712,12 +934,12 @@ class MainActivity : AppCompatActivity() {
                                         businessName = activeBusiness.name,
                                         userName = userName,
                                         phoneNumber = authenticatedPhone,
-                                        selectedLanguageName = selectedLanguage.nameInNative
+                                        selectedLanguageName = selectedLanguage.nameInNative,
+                                        canManageStaff = canManageStaff
                                     )
                                 }
 
                                 AppScreen.SETTINGS -> {
-                                    val settingsScope = rememberCoroutineScope()
                                     SettingsScreen(
                                         onBackClick = { navigateBack() },
                                         onSmsSettingsClick = { navigateTo(AppScreen.SMS_SETTINGS) },
@@ -726,30 +948,29 @@ class MainActivity : AppCompatActivity() {
                                         onBackupInfoClick = { navigateTo(AppScreen.BACKUP_INFO) },
                                         onDeleteKhataClick = { navigateTo(AppScreen.DELETE_KHATA) },
                                         onChangeLanguageClick = { navigateTo(AppScreen.LANGUAGE_SELECTION) },
+                                        onHelpSupportClick = { navigateTo(AppScreen.HELP_SUPPORT) },
+                                        onAboutUsClick = { navigateTo(AppScreen.ABOUT_US) },
+                                        canDeleteBusiness = isBusinessOwner,
                                         onLogoutClick = {
                                             // Logout previously only flipped a local flag: the JWT
                                             // stayed in encrypted prefs and stayed valid server-side
                                             // for its full 7 days, so a "logged out" phone was still
-                                            // a working credential.
-                                            settingsScope.launch {
-                                                // Revoke first, while the token is still present for
-                                                // the interceptor to send. Best effort — if offline,
-                                                // the local credential is cleared regardless.
-                                                runCatching { NetworkClient.apiService.logout() }
-
-                                                clearSession(prefs, authenticatedPhone, loggedInPhones)
-                                                authenticatedPhone = ""
-                                                updateLoginState(false)
-                                                this@MainActivity.finish()
+                                            // a working credential. The actual revoke + session clear
+                                            // now runs in the top-level isLoggingOut LaunchedEffect
+                                            // (see below), on the repository/app's own lifetime, not
+                                            // this screen's — guarded here against a second tap.
+                                            if (!isLoggingOut) {
+                                                logoutComplete = false
+                                                isLoggingOut = true
                                             }
                                         },
                                         isAppLockEnabled = isAppLockEnabled,
                                         onToggleAppLock = { enabled, pin ->
                                             isAppLockEnabled = enabled
-                                            prefs.edit().putBoolean("app_lock_enabled", enabled).apply()
+                                            prefs.edit().putBoolean("app_lock_enabled_$authenticatedPhone", enabled).apply()
                                             if (pin != null) {
                                                 appLockPin = pin
-                                                prefs.edit().putString("app_lock_pin", pin).apply()
+                                                prefs.edit().putString("app_lock_pin_$authenticatedPhone", pin).apply()
                                             }
                                         },
                                         isProfileLockEnabled = profileLocksMap.containsKey(selectedBusinessId),
@@ -769,7 +990,8 @@ class MainActivity : AppCompatActivity() {
 
                                 AppScreen.SMS_SETTINGS -> {
                                     SmsSettingsScreen(
-                                        onBackClick = { navigateBack() }
+                                        onBackClick = { navigateBack() },
+                                        repository = repository
                                     )
                                 }
 
@@ -800,6 +1022,7 @@ class MainActivity : AppCompatActivity() {
                                         onBackClick = { navigateBack() },
                                         onAddStaffClick = { navigateTo(AppScreen.STAFF_CONTACT_PICKER) },
                                         refreshKey = staffRefreshKey,
+                                        repository = repository
                                     )
                                 }
 
@@ -823,11 +1046,19 @@ class MainActivity : AppCompatActivity() {
                                 }
                                 
                                 AppScreen.BILLS -> {
-                                    BillsScreen(onBackClick = { navigateBack() })
+                                    BillsScreen(
+                                        onBackClick = { navigateBack() },
+                                        parties = parties.filter { it.businessId == selectedBusinessId },
+                                        repository = repository
+                                    )
                                 }
-                                
+
                                 AppScreen.ITEMS -> {
-                                    ItemsScreen(onBackClick = { navigateBack() })
+                                    ItemsScreen(
+                                        onBackClick = { navigateBack() },
+                                        canManageInventory = canManageInventory,
+                                        repository = repository
+                                    )
                                 }
                                 
                                 AppScreen.HELP_SUPPORT -> {
@@ -840,32 +1071,31 @@ class MainActivity : AppCompatActivity() {
                                 
                                 AppScreen.EDIT_PROFILE -> {
                                     BookProfileScreen(
-                                        onBackClick = { navStack.removeLast() }
+                                        onBackClick = { navigateBack() },
+                                        repository = repository
                                     )
                                 }
                             }
                         }
                     }
 
-                    // Account Switching Overlay state for Instagram-style account switcher
-                    val switcherScope = rememberCoroutineScope()
-                    var switchingBusinessTarget by remember { mutableStateOf<BusinessAccount?>(null) }
-                    var pendingBusinessLockTarget by remember { mutableStateOf<Pair<BusinessAccount, String>?>(null) }
-
                     // Instagram-style Business Switcher Dialog Modal
                     if (showBusinessSwitcher) {
                         BusinessSwitcherDialog(
                             businesses = businesses,
-                            activeBusinessId = activeBusinessId,
+                            activeBusinessId = selectedBusinessId,
                             onBusinessSelect = { biz ->
                                 showBusinessSwitcher = false
-                                if (biz.id != activeBusinessId) {
+                                // Guards against a second tap landing while a switch/lock
+                                // check from the first tap is still in flight.
+                                if (biz.id != selectedBusinessId && !transitionInProgress && pendingBusinessLockTarget == null) {
                                     val profilePin = profileLocksMap[biz.id]
                                     if (profilePin != null) {
                                         // Profile lock is active → require PIN verification
                                         pendingBusinessLockTarget = Pair(biz, profilePin)
                                     } else {
                                         // No profile lock set → switch directly, no dialog
+                                        businessSwitchComplete = false
                                         switchingBusinessTarget = biz
                                     }
                                 }
@@ -874,7 +1104,10 @@ class MainActivity : AppCompatActivity() {
                                 showBusinessSwitcher = false
                                 switcherScope.launch {
                                     val created = repository.createBusiness(name, "Retail Store")
-                                    if (created != null) switchingBusinessTarget = created
+                                    if (created != null && !transitionInProgress) {
+                                        businessSwitchComplete = false
+                                        switchingBusinessTarget = created
+                                    }
                                 }
                             },
                             onDismiss = { showBusinessSwitcher = false }
@@ -888,7 +1121,10 @@ class MainActivity : AppCompatActivity() {
                             onPinSuccess = {
                                 val biz = pendingBusinessLockTarget!!.first
                                 pendingBusinessLockTarget = null
-                                switchingBusinessTarget = biz
+                                if (!transitionInProgress) {
+                                    businessSwitchComplete = false
+                                    switchingBusinessTarget = biz
+                                }
                             },
                             onDismiss = {
                                 pendingBusinessLockTarget = null
@@ -898,12 +1134,49 @@ class MainActivity : AppCompatActivity() {
 
                     if (switchingBusinessTarget != null) {
                         BusinessSwitchingOverlay(
-                            targetBusinessName = switchingBusinessTarget!!.name,
-                            onAnimationComplete = {
-                                val biz = switchingBusinessTarget!!
+                            mode = com.example.khatabook.ui.components.AccountTransitionMode.BUSINESS_SWITCH,
+                            targetLabel = switchingBusinessTarget!!.name,
+                            isOperationComplete = businessSwitchComplete,
+                            onFinished = {
                                 switchingBusinessTarget = null
-                                activeBusinessId = biz.id
-                                switcherScope.launch { repository.switchBusiness(biz.id) }
+                                businessSwitchComplete = false
+                            }
+                        )
+                    }
+
+                    if (switchingAccountTarget != null) {
+                        BusinessSwitchingOverlay(
+                            mode = com.example.khatabook.ui.components.AccountTransitionMode.ACCOUNT_SWITCH,
+                            targetLabel = switchingAccountTarget!!,
+                            isOperationComplete = accountSwitchComplete,
+                            onFinished = {
+                                val phone = switchingAccountTarget!!
+                                // authenticatedPhone (the *visible* identity) is applied only
+                                // now, once the new account's data is already loaded behind
+                                // this still-visible overlay — so the screen underneath never
+                                // shows a frame with the old account's data under the new
+                                // account's identity. auth_phone itself (what selects which
+                                // JWT NetworkClient sends) was already written before this
+                                // effect's network calls ran — see the switchingAccountTarget
+                                // LaunchedEffect above — so it is not repeated here.
+                                authenticatedPhone = phone
+                                navStack.clear()
+                                navStack.add(AppScreen.PARTIES)
+                                switchingAccountTarget = null
+                                accountSwitchComplete = false
+                            }
+                        )
+                    }
+
+                    if (isLoggingOut) {
+                        BusinessSwitchingOverlay(
+                            mode = com.example.khatabook.ui.components.AccountTransitionMode.LOGOUT,
+                            targetLabel = "",
+                            isOperationComplete = logoutComplete,
+                            onFinished = {
+                                authenticatedPhone = ""
+                                updateLoginState(false)
+                                this@MainActivity.finish()
                             }
                         )
                     }
@@ -954,13 +1227,24 @@ class MainActivity : AppCompatActivity() {
                     if (showAccountSwitcher) {
                         MultiSessionAccountSwitcherDialog(
                             phoneNumbers = loggedInPhones,
+                            // "" default (not getUserPref's own "User" default) so a
+                            // truly-unset name is unambiguous to the dialog, which
+                            // applies its own "User Account" fallback — a real user
+                            // literally named "User" is otherwise indistinguishable
+                            // from "nothing was ever saved for this account".
+                            accountNames = loggedInPhones.associateWith { phone -> getUserPref("user_name", phone, "") },
                             activePhoneNumber = authenticatedPhone,
                             onPhoneSelect = { phone ->
-                                authenticatedPhone = phone
-                                prefs.edit().putString("auth_phone", phone).apply()
-                                repository.switchUser(phone)
-                                navStack.clear()
-                                navStack.add(AppScreen.PARTIES)
+                                showAccountSwitcher = false
+                                // Guarded against a second tap while the previous selection is
+                                // still switching. authenticatedPhone/navStack are applied by
+                                // the account-switch overlay's onFinished, only once the new
+                                // account's data has actually loaded (see switchingAccountTarget
+                                // above) — not here, and not before that finishes.
+                                if (phone != authenticatedPhone && !transitionInProgress) {
+                                    accountSwitchComplete = false
+                                    switchingAccountTarget = phone
+                                }
                             },
                             onAddNewAccount = {
                                 navStack.add(AppScreen.MOBILE_AUTH)

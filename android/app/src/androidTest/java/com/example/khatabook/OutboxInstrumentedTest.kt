@@ -2,11 +2,13 @@ package com.example.khatabook
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.example.khatabook.data.api.CreateBusinessRequest
 import com.example.khatabook.data.api.NetworkClient
 import com.example.khatabook.data.model.PartyType
 import com.example.khatabook.data.model.TransactionType
 import com.example.khatabook.data.repository.KhatabookRepository
 import kotlinx.coroutines.runBlocking
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -47,23 +49,47 @@ class OutboxInstrumentedTest {
     // result gives JUnit a non-void @Before, which it rejects.
     @Before
     fun setUp(): Unit = runBlocking {
-        // Start from a clean slate on the device.
+        // Start from a clean slate on the device. "khatabook_repository_prefs"
+        // (no suffix) is the legacy plaintext file from before the
+        // EncryptedSharedPreferences migration — KhatabookRepository actually
+        // reads/writes "khatabook_repository_prefs_enc" for everything
+        // (outbox included), so clearing only the old name left every test
+        // method in this class accumulating real, persisted outbox state
+        // across runs (same phone number reused throughout the class).
         context.getSharedPreferences("khatabook_repository_prefs", 0).edit().clear().commit()
-
-        NetworkClient.updateBaseUrl(serverUrl)
-        NetworkClient.init({ token })
+        context.getSharedPreferences("khatabook_repository_prefs_enc", 0).edit().clear().commit()
 
         token = InstrumentationRegistry.getArguments().getString("authToken")
         assertNotNull("pass -e authToken <jwt>", token)
+
+        repo = KhatabookRepository(context)
+        NetworkClient.updateBaseUrl(serverUrl)
+        // The interceptor must read the active business from the repository, or
+        // every queued write is stamped with businessId = "" and permanently
+        // refused by flushOutbox()'s "never guess which business" guard before
+        // it ever reaches the network.
+        NetworkClient.init({ token }, { repo.currentBusinessId() })
 
         // Prove the token actually works before relying on it.
         val probe = NetworkClient.apiService.getParties()
         assertTrue("auth probe failed: ${probe.code()}", probe.isSuccessful)
 
-        repo = KhatabookRepository(context)
         repo.setServerUrl(serverUrl)
         repo.switchUser("9000000009")
+
+        val business = NetworkClient.apiService.createBusiness(CreateBusinessRequest("Outbox Test Biz", "Retail"))
+        assertTrue("create business failed: ${business.code()}", business.isSuccessful)
+        assertTrue("failed to activate the test business", repo.switchBusiness(business.body()!!.id))
+
         repo.flushOutbox()
+    }
+
+    @After
+    fun tearDown(): Unit = runBlocking {
+        // NetworkClient is a process-wide singleton reconfigured by the next
+        // test's setUp() — without this, a straggler background flush from
+        // this test's repo can still be executing when the next test starts.
+        repo.cancelBackgroundWorkForTesting()
     }
 
     @Test

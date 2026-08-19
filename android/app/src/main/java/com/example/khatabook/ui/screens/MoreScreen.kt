@@ -19,10 +19,8 @@ import androidx.compose.material.icons.automirrored.filled.Help
 import androidx.compose.material.icons.filled.Inventory
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Language
-import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.material.icons.automirrored.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Settings
@@ -39,8 +37,6 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.khatabook.ui.components.BusinessCardDialog
-import com.example.khatabook.ui.components.BusinessQrCodeDialog
 import com.example.khatabook.ui.components.bounceClick
 import com.example.khatabook.ui.theme.*
 
@@ -61,7 +57,6 @@ fun MoreScreen(
     onSmsSettingsClick: () -> Unit = {},
     onSwitchAccountClick: () -> Unit = {},
     onChangeLanguageClick: () -> Unit = {},
-    onReAuthenticateClick: () -> Unit = {},
     onEditProfileClick: () -> Unit = {},
     onBillsClick: () -> Unit = {},
     onItemsClick: () -> Unit = {},
@@ -71,13 +66,13 @@ fun MoreScreen(
     userName: String = "User",
     phoneNumber: String = "",
     selectedLanguageName: String = "English",
+    /** OWNER/MANAGER only, matching the server's own restriction on staff management. */
+    canManageStaff: Boolean = true,
     modifier: Modifier = Modifier
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     val scrollState = rememberScrollState()
-
-    var showQrDialog by remember { mutableStateOf(false) }
-    var showCardDialog by remember { mutableStateOf(false) }
-
+    var isStoreNameExpanded by remember { mutableStateOf(false) }
     val shortcuts = listOf(
         GridShortcutVector("Cashbook", Icons.Default.AccountBalanceWallet, Color(0xFFE0F2FE)),
         GridShortcutVector("Bills", Icons.AutoMirrored.Filled.ReceiptLong, Color(0xFFFEE2E2)),
@@ -229,39 +224,6 @@ fun MoreScreen(
 
                         Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = KhatabookTextMuted)
                     }
-
-                    HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp), color = KhatabookBorderLight)
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        BounceOutlinedButton(
-                            onClick = { showQrDialog = true },
-                            shape = RoundedCornerShape(8.dp),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, KhatabookHeaderBlue),
-                            modifier = Modifier.weight(1f).height(40.dp).bounceClick { showQrDialog = true }
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.QrCode, contentDescription = null, tint = KhatabookHeaderBlue, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("QR Code", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = KhatabookHeaderBlue)
-                            }
-                        }
-
-                        BounceOutlinedButton(
-                            onClick = { showCardDialog = true },
-                            shape = RoundedCornerShape(8.dp),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, KhatabookHeaderBlue),
-                            modifier = Modifier.weight(1f).height(40.dp).bounceClick { showCardDialog = true }
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.CreditCard, contentDescription = null, tint = KhatabookHeaderBlue, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Business Card", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = KhatabookHeaderBlue)
-                            }
-                        }
-                    }
                 }
             }
 
@@ -297,7 +259,17 @@ fun MoreScreen(
                     GridItemCardVector(
                         shortcut = shortcuts[3],
                         modifier = Modifier.weight(1f),
-                        onClick = onStaffClick
+                        onClick = {
+                            if (canManageStaff) {
+                                onStaffClick()
+                            } else {
+                                android.widget.Toast.makeText(
+                                    context,
+                                    "Only owners and managers can manage staff",
+                                    android.widget.Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        }
                     )
                     GridItemCardVector(
                         shortcut = shortcuts[4],
@@ -307,7 +279,9 @@ fun MoreScreen(
                     GridItemCardVector(
                         shortcut = shortcuts[5],
                         modifier = Modifier.weight(1f),
-                        onClick = {}
+                        onClick = {
+                            android.widget.Toast.makeText(context, "Shop Insurance is coming soon", android.widget.Toast.LENGTH_SHORT).show()
+                        }
                     )
                 }
             }
@@ -360,14 +334,6 @@ fun MoreScreen(
                     HorizontalDivider(color = KhatabookBorderLight)
 
                     MoreListRowItem(
-                        icon = Icons.Default.Lock,
-                        title = "Re-Authenticate Mobile",
-                        onClick = onReAuthenticateClick
-                    )
-
-                    HorizontalDivider(color = KhatabookBorderLight)
-
-                    MoreListRowItem(
                         icon = Icons.AutoMirrored.Filled.Help,
                         title = "Help & Support",
                         onClick = onHelpSupportClick
@@ -381,25 +347,9 @@ fun MoreScreen(
                         onClick = onAboutUsClick
                     )
                 }
-            }
-        }
-
-        // Business Payment QR Code Modal Dialog
-        if (showQrDialog) {
-            BusinessQrCodeDialog(
-                businessName = businessName,
-                onDismiss = { showQrDialog = false }
-            )
-        }
-
-        // Business Digital Card Modal Dialog
-        if (showCardDialog) {
-            BusinessCardDialog(
-                businessName = businessName,
-                onDismiss = { showCardDialog = false }
-            )
         }
     }
+}
 }
 
 @Composable

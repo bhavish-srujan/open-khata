@@ -170,6 +170,37 @@ describe('LedgerService — idempotent create', () => {
     expect(sendSms).toHaveBeenCalledTimes(1);
   });
 
+  // Bug fix: the client's "Send transaction SMS" toggle was never reaching
+  // the server, so turning it off never stopped this SMS. notifyCustomer is
+  // how the toggle's value now reaches create().
+  describe('notifyCustomer gating', () => {
+    it('sends the SMS when notifyCustomer is true', async () => {
+      await service.create(BUSINESS_A, { ...dto, notifyCustomer: true });
+
+      expect(sendSms).toHaveBeenCalledTimes(1);
+    });
+
+    it('does NOT send the SMS when notifyCustomer is false', async () => {
+      const entry = await service.create(BUSINESS_A, {
+        ...dto,
+        notifyCustomer: false,
+      });
+
+      expect(sendSms).not.toHaveBeenCalled();
+      // The toggle only suppresses the SMS side effect — the entry itself
+      // and the balance update must still happen normally.
+      expect(entry).toBeDefined();
+      expect(entries).toHaveLength(1);
+      expect(Number(party.currentBalance)).toBe(500);
+    });
+
+    it('sends the SMS when notifyCustomer is omitted (older app builds)', async () => {
+      await service.create(BUSINESS_A, dto);
+
+      expect(sendSms).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it('returns the originally stored entry on replay', async () => {
     const first = await service.create(BUSINESS_A, {
       ...dto,

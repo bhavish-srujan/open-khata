@@ -42,16 +42,52 @@ data class ContactItem(
     val avatarBg: Color
 )
 
-private val sampleContacts = listOf(
-    ContactItem("c1", "Aakash Sharma", "+91 98111 22334", "AS", Color(0xFFEF4444)),
-    ContactItem("c2", "Ankit Patel", "+91 97222 33445", "AP", Color(0xFF3B82F6)),
-    ContactItem("c3", "Bhavna Gupta", "+91 99333 44556", "BG", Color(0xFF10B981)),
-    ContactItem("c4", "Deepak Verma", "+91 98444 55667", "DV", Color(0xFFF59E0B)),
-    ContactItem("c5", "Gaurav Singh", "+91 97555 66778", "GS", Color(0xFF8B5CF6)),
-    ContactItem("c6", "Harish Kumar", "+91 99666 77889", "HK", Color(0xFFEC4899)),
-    ContactItem("c7", "Karan Malhotra", "+91 98777 88990", "KM", Color(0xFF06B6D4)),
-    ContactItem("c8", "Manish Joshi", "+91 97888 99001", "MJ", Color(0xFF84CC16))
-)
+/**
+ * Explains why the contact list is empty and offers a way out, instead of a
+ * silent blank list indistinguishable from "you have no contacts". Shared by
+ * [CustomerContactPickerScreen] and [StaffContactPickerScreen] — same gap,
+ * same fix, both in this package so no import is needed at the call site.
+ *
+ * [ActivityResultContracts.RequestPermission] only ever shows the system
+ * dialog once per app install after a permanent denial, so "ask again" is
+ * not always possible from here — Settings is the only way back for that
+ * case, and is offered unconditionally rather than trying to detect it.
+ */
+@Composable
+internal fun ContactsPermissionDeniedNotice(context: android.content.Context) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 32.dp, horizontal = 16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = "Contacts permission needed",
+            fontSize = 15.sp,
+            fontWeight = FontWeight.Bold,
+            color = KhatabookTextDark
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            text = "Grant contacts access to pick people from your phonebook, or use \"Add New Customer Manually\" above.",
+            fontSize = 13.sp,
+            color = KhatabookTextMuted,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+        )
+        Spacer(modifier = Modifier.height(14.dp))
+        BounceTextButton(
+            onClick = {
+                val intent = android.content.Intent(
+                    android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    android.net.Uri.fromParts("package", context.packageName, null)
+                )
+                context.startActivity(intent)
+            }
+        ) {
+            Text("OPEN SETTINGS", fontWeight = FontWeight.Bold, color = KhatabookHeaderBlue)
+        }
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -184,6 +220,13 @@ fun CustomerContactPickerScreen(
                                 CircularProgressIndicator(color = KhatabookHeaderBlue)
                             }
                         }
+                    } else if (!permissionGranted) {
+                        // Previously a denial just left this list silently empty —
+                        // indistinguishable from "you have no contacts" — with no
+                        // explanation and no way to grant it short of finding
+                        // Settings on your own. "Add New Customer Manually" above
+                        // still works either way.
+                        item { ContactsPermissionDeniedNotice(context) }
                     }
 
                     items(filteredContacts) { contact ->

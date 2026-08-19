@@ -30,6 +30,17 @@ fun AppLockScreen(
 ) {
     var enteredPin by remember { mutableStateOf("") }
     var errorMsg by remember { mutableStateOf<String?>(null) }
+    var failedAttempts by remember { mutableStateOf(0) }
+    var lockoutEndTime by remember { mutableStateOf(0L) }
+    var lockoutSecondsRemaining by remember { mutableStateOf(0) }
+
+    LaunchedEffect(lockoutEndTime) {
+        while (lockoutEndTime > System.currentTimeMillis()) {
+            lockoutSecondsRemaining = ((lockoutEndTime - System.currentTimeMillis()) / 1000).toInt()
+            kotlinx.coroutines.delay(1000L)
+        }
+        lockoutSecondsRemaining = 0
+    }
 
     Box(
         modifier = modifier
@@ -69,19 +80,29 @@ fun AppLockScreen(
                 OutlinedTextField(
                     value = enteredPin,
                     onValueChange = {
+                        if (lockoutSecondsRemaining > 0) return@OutlinedTextField
                         if (it.length <= 4) {
                             enteredPin = it
                             errorMsg = null
                             if (it.length == 4) {
                                 if (it == correctPin) {
+                                    failedAttempts = 0
                                     onUnlockSuccess()
                                 } else {
-                                    errorMsg = "Incorrect PIN. Please try again."
+                                    failedAttempts++
+                                    if (failedAttempts >= 5) {
+                                        val backoffSeconds = 30L * (1 shl (failedAttempts - 5).coerceAtMost(5))
+                                        lockoutEndTime = System.currentTimeMillis() + (backoffSeconds * 1000)
+                                        errorMsg = "Too many failed attempts. Try again in $backoffSeconds seconds."
+                                    } else {
+                                        errorMsg = "Incorrect PIN. Please try again."
+                                    }
                                     enteredPin = ""
                                 }
                             }
                         }
                     },
+                    enabled = lockoutSecondsRemaining <= 0,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                     visualTransformation = PasswordVisualTransformation(),
                     singleLine = true,

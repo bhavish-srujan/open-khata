@@ -41,6 +41,37 @@ export class Party {
   @Column({ nullable: true })
   address: string;
 
+  /**
+   * Interest configuration is per-party, optional, and never annualized or
+   * auto-converted: interestRate applies as-is to whatever
+   * interestPeriodValue/interestPeriodUnit says (e.g. "5% / 100 Days" means
+   * exactly that, not a daily or yearly rate). Defaults leave every existing
+   * party with interest off and zero-valued fields — created before this
+   * column existed, none of them silently start accruing anything.
+   */
+  @Column({ name: 'interest_enabled', type: 'boolean', default: false })
+  interestEnabled: boolean;
+
+  @Column({
+    name: 'interest_rate',
+    type: 'decimal',
+    precision: 8,
+    scale: 3,
+    default: 0,
+  })
+  interestRate: number;
+
+  @Column({ name: 'interest_period_value', type: 'int', default: 0 })
+  interestPeriodValue: number;
+
+  @Column({
+    name: 'interest_period_unit',
+    type: 'varchar',
+    length: 10,
+    default: 'DAYS',
+  })
+  interestPeriodUnit: 'DAYS' | 'MONTHS';
+
   @CreateDateColumn()
   createdAt: Date;
 

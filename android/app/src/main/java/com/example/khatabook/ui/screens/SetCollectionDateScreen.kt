@@ -77,11 +77,10 @@ fun SetCollectionDateScreen(
                                 Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
                             }
                         },
-                        actions = {
-                            BounceTextButton(onClick = {}) {
-                                Text("SELECT ALL", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                            }
-                        },
+                        // "SELECT ALL" removed: this screen has no multi-select
+                        // (no per-row checkbox/selection state exists here), so
+                        // the action had nothing to select and did nothing when
+                        // tapped.
                         colors = TopAppBarDefaults.topAppBarColors(containerColor = KhatabookHeaderBlue)
                     )
                 }
@@ -327,14 +326,18 @@ fun SetCollectionDateScreen(
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Icon(Icons.Default.ChevronLeft, contentDescription = "Prev Month", tint = KhatabookHeaderBlue, modifier = Modifier.size(24.dp).clickable { })
+                                    // Month navigation is not implemented — only a single fixed
+                                    // month is ever rendered below — so these are intentionally
+                                    // inert rather than wired to a `.clickable {}` that silently
+                                    // did nothing when tapped.
+                                    Icon(Icons.Default.ChevronLeft, contentDescription = null, tint = KhatabookHeaderBlue.copy(alpha = 0.4f), modifier = Modifier.size(24.dp))
                                     Text(
                                         text = "August 2026",
                                         fontSize = 15.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = KhatabookTextDark
                                     )
-                                    Icon(Icons.Default.ChevronRight, contentDescription = "Next Month", tint = KhatabookHeaderBlue, modifier = Modifier.size(24.dp).clickable { })
+                                    Icon(Icons.Default.ChevronRight, contentDescription = null, tint = KhatabookHeaderBlue.copy(alpha = 0.4f), modifier = Modifier.size(24.dp))
                                 }
 
                                 Spacer(modifier = Modifier.height(14.dp))
@@ -526,7 +529,13 @@ fun SetCollectionDateScreen(
 
                             BounceButton(
                                 onClick = {
-                                    val toast = when (val r = SmsSender.send(context, party.phone, messageText)) {
+                                    // Was previously duplicated verbatim into an
+                                    // external .bounceClick{} on this button's own
+                                    // modifier too — BounceButton already registers
+                                    // onClick internally (see KhatabookButtons.kt), so
+                                    // that second copy was a redundant handler for the
+                                    // same tap, not a distinct control.
+                                    val toast = when (val r = SmsSender.send(context, party.phone, messageText, party.businessId)) {
                                         is SmsSender.Result.Sent -> "Reminder sent to ${party.name}"
                                         is SmsSender.Result.PermissionMissing -> "Allow SMS permission in Settings"
                                         is SmsSender.Result.Failed -> "Could not send: ${r.reason}"
@@ -537,15 +546,7 @@ fun SetCollectionDateScreen(
                                 colors = ButtonDefaults.buttonColors(containerColor = KhatabookHeaderBlue),
                                 shape = RoundedCornerShape(8.dp),
                                 contentPadding = PaddingValues(horizontal = 6.dp),
-                                modifier = Modifier.weight(1f).height(46.dp).bounceClick {
-                                    val toast = when (val r = SmsSender.send(context, party.phone, messageText)) {
-                                        is SmsSender.Result.Sent -> "Reminder sent to ${party.name}"
-                                        is SmsSender.Result.PermissionMissing -> "Allow SMS permission in Settings"
-                                        is SmsSender.Result.Failed -> "Could not send: ${r.reason}"
-                                    }
-                                    android.widget.Toast.makeText(context, toast, android.widget.Toast.LENGTH_LONG).show()
-                                    showReminderDialog = false
-                                }
+                                modifier = Modifier.weight(1f).height(46.dp)
                             ) {
                                 Icon(Icons.Default.Message, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(6.dp))

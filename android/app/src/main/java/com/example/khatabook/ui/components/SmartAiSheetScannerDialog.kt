@@ -5,9 +5,17 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Matrix
 import android.net.Uri
 import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.provider.MediaStore
+import android.util.Log
 import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.FileProvider
+import androidx.exifinterface.media.ExifInterface
 import com.example.khatabook.data.api.NetworkClient
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
@@ -58,7 +66,10 @@ data class LedgerSheetRecord(
     val date: String,
     var customerCodeOrName: String,
     var amountCollected: Double,
-    var isSelected: Boolean = true
+    var isSelected: Boolean = true,
+    var isNewCustomer: Boolean = false,
+    var newPhone: String = "",
+    var newAddress: String = ""
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -80,6 +91,7 @@ fun SmartAiSheetScannerDialog(
     
     val extractedRecords = remember { mutableStateListOf<LedgerSheetRecord>() }
     val coroutineScope = rememberCoroutineScope()
+    var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
 
     fun performScan(imagePart: MultipartBody.Part) {
         currentStep = 2 // 2 means scanning
@@ -113,7 +125,8 @@ fun SmartAiSheetScannerDialog(
                                     date = data.date,
                                     customerCodeOrName = finalName,
                                     amountCollected = extracted.amount,
-                                    isSelected = true
+                                    isSelected = true,
+                                    isNewCustomer = matchedParty == null
                                 )
                             )
                         }
@@ -123,10 +136,13 @@ fun SmartAiSheetScannerDialog(
                         currentStep = 1 // Go back to start
                     }
                 } else {
-                    val serverMessage = response.errorBody()?.string()?.takeIf { it.isNotBlank() }
+                    val rawBody = response.errorBody()?.string()
                     uploadError = when {
                         response.code() == 401 -> "Authentication failed. Please log in again."
-                        serverMessage != null -> "Server error ${response.code()}: $serverMessage"
+                        !rawBody.isNullOrBlank() -> com.example.khatabook.utils.parseApiErrorMessage(
+                            rawBody,
+                            "Failed to connect to AI server (HTTP ${response.code()}). Check backend URL and network connectivity."
+                        )
                         else -> "Failed to connect to AI server (HTTP ${response.code()}). Check backend URL and network connectivity."
                     }
                     currentStep = 1
@@ -138,19 +154,36 @@ fun SmartAiSheetScannerDialog(
         }
     }
 
-    val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicturePreview()) { bitmap ->
-        if (bitmap != null) {
+    // Both launchers hand off to the same processImageUriForUpload: a
+    // full-resolution TakePicture() capture and a gallery pick need
+    // identical treatment (decode, EXIF-correct, bound, re-encode), and
+    // previously only the camera path got any processing at all.
+    val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { success ->
+        val uri = pendingCameraUri
+        pendingCameraUri = null
+        Log.d("SmartAiScanner", "TakePicture result: success=$success uri=$uri")
+        if (success && uri != null) {
             selectedSource = "Camera Capture"
-            val part = bitmapToMultipart(context, bitmap)
-            if (part != null) performScan(part) else uploadError = "Failed to process photo"
+            coroutineScope.launch {
+                val part = withContext(Dispatchers.Default) { processImageUriForUpload(context, uri) }
+                if (part != null) {
+                    performScan(part)
+                } else {
+                    uploadError = "Failed to process photo. Please try again."
+                }
+            }
+        } else if (!success) {
+            Log.w("SmartAiScanner", "Camera reported failure/cancellation")
         }
     }
 
     val galleryLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) {
             selectedSource = "Gallery Image Upload"
-            val part = uriToMultipart(context, uri)
-            if (part != null) performScan(part) else uploadError = "Failed to read image"
+            coroutineScope.launch {
+                val part = withContext(Dispatchers.Default) { processImageUriForUpload(context, uri) }
+                if (part != null) performScan(part) else uploadError = "Failed to read image"
+            }
         }
     }
 
@@ -214,7 +247,9 @@ fun SmartAiSheetScannerDialog(
                             .fillMaxWidth()
                             .bounceClick {
                                 try {
-                                    cameraLauncher.launch(null)
+                                    val uri = createCameraImageUri(context)
+                                    pendingCameraUri = uri
+                                    cameraLauncher.launch(uri)
                                 } catch (e: Exception) {
                                     uploadError = "Camera not available"
                                 }
@@ -280,7 +315,7 @@ fun SmartAiSheetScannerDialog(
                             Text("Analyzing handwriting and values from image", fontSize = 12.sp, color = KhatabookTextMuted)
                         }
                     }
-                } else {
+                } else if (currentStep == 3) {
                     // Step 3: Extracted Data Review & Edit Table
                     Card(
                         modifier = Modifier.fillMaxWidth(),
@@ -335,8 +370,8 @@ fun SmartAiSheetScannerDialog(
                         modifier = Modifier.weight(1f).padding(vertical = 4.dp),
                         verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        itemsIndexed(extractedRecords) { idx, record ->
-                            val isEditing = editingRecordId == record.id
+                        itemsIndexed(extractedRecords) { idx, rec ->
+                            val isEditing = editingRecordId == rec.id
 
                             if (isEditing) {
                                 Row(
@@ -371,9 +406,9 @@ fun SmartAiSheetScannerDialog(
 
                                     BounceButton(
                                         onClick = {
-                                            val newAmt = editAmountText.toDoubleOrNull() ?: record.amountCollected
-                                            extractedRecords[idx] = record.copy(
-                                                customerCodeOrName = editNameText.ifBlank { record.customerCodeOrName },
+                                            val newAmt = editAmountText.toDoubleOrNull() ?: rec.amountCollected
+                                            extractedRecords[idx] = rec.copy(
+                                                customerCodeOrName = editNameText.ifBlank { rec.customerCodeOrName },
                                                 amountCollected = newAmt
                                             )
                                             editingRecordId = null
@@ -382,9 +417,9 @@ fun SmartAiSheetScannerDialog(
                                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
                                         colors = ButtonDefaults.buttonColors(containerColor = KhatabookHeaderBlue),
                                         modifier = Modifier.bounceClick {
-                                            val newAmt = editAmountText.toDoubleOrNull() ?: record.amountCollected
-                                            extractedRecords[idx] = record.copy(
-                                                customerCodeOrName = editNameText.ifBlank { record.customerCodeOrName },
+                                            val newAmt = editAmountText.toDoubleOrNull() ?: rec.amountCollected
+                                            extractedRecords[idx] = rec.copy(
+                                                customerCodeOrName = editNameText.ifBlank { rec.customerCodeOrName },
                                                 amountCollected = newAmt
                                             )
                                             editingRecordId = null
@@ -398,31 +433,40 @@ fun SmartAiSheetScannerDialog(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .clickable {
-                                            extractedRecords[idx] = record.copy(isSelected = !record.isSelected)
+                                            extractedRecords[idx] = rec.copy(isSelected = !rec.isSelected)
                                         }
                                         .padding(horizontal = 6.dp, vertical = 6.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Checkbox(
-                                        checked = record.isSelected,
+                                        checked = rec.isSelected,
                                         onCheckedChange = { checked ->
-                                            extractedRecords[idx] = record.copy(isSelected = checked)
+                                            extractedRecords[idx] = rec.copy(isSelected = checked)
                                         },
                                         modifier = Modifier.size(32.dp)
                                     )
 
                                     Spacer(modifier = Modifier.width(6.dp))
 
-                                    Text(
-                                        text = record.customerCodeOrName,
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = KhatabookTextDark,
-                                        modifier = Modifier.weight(1f)
-                                    )
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = rec.customerCodeOrName,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 14.sp,
+                                            color = KhatabookTextDark
+                                        )
+                                        if (rec.isNewCustomer) {
+                                            Text(
+                                                text = "New Customer",
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = KhatabookGiveRed
+                                            )
+                                        }
+                                    }
 
                                     Text(
-                                        text = "₹ ${record.amountCollected.toInt()}",
+                                        text = "₹ ${rec.amountCollected.toInt()}",
                                         fontSize = 13.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = KhatabookGotGreen,
@@ -431,9 +475,9 @@ fun SmartAiSheetScannerDialog(
 
                                     BounceIconButton(
                                         onClick = {
-                                            editingRecordId = record.id
-                                            editNameText = record.customerCodeOrName
-                                            editAmountText = record.amountCollected.toInt().toString()
+                                            editingRecordId = rec.id
+                                            editNameText = rec.customerCodeOrName
+                                            editAmountText = rec.amountCollected.toInt().toString()
                                         },
                                         modifier = Modifier.size(28.dp)
                                     ) {
@@ -453,8 +497,13 @@ fun SmartAiSheetScannerDialog(
                     BounceButton(
                         onClick = {
                             val active = extractedRecords.filter { it.isSelected }
-                            onBulkLedgerUpdate(active, sheetDate)
-                            onDismiss()
+                            val newCustomers = active.filter { it.isNewCustomer }
+                            if (newCustomers.isNotEmpty()) {
+                                currentStep = 4
+                            } else {
+                                onBulkLedgerUpdate(active, sheetDate)
+                                onDismiss()
+                            }
                         },
                         shape = RoundedCornerShape(10.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = KhatabookGotGreen),
@@ -463,8 +512,13 @@ fun SmartAiSheetScannerDialog(
                             .height(48.dp)
                             .bounceClick {
                                 val active = extractedRecords.filter { it.isSelected }
-                                onBulkLedgerUpdate(active, sheetDate)
-                                onDismiss()
+                                val newCustomers = active.filter { it.isNewCustomer }
+                                if (newCustomers.isNotEmpty()) {
+                                    currentStep = 4
+                                } else {
+                                    onBulkLedgerUpdate(active, sheetDate)
+                                    onDismiss()
+                                }
                             }
                     ) {
                         Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -475,37 +529,232 @@ fun SmartAiSheetScannerDialog(
                             fontSize = 13.sp
                         )
                     }
+                } else if (currentStep == 4) {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(18.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "New Customers Found",
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = KhatabookTextDark
+                        )
+                        BounceIconButton(onClick = onDismiss, modifier = Modifier.size(24.dp)) {
+                            Icon(Icons.Default.Close, contentDescription = "Close", tint = KhatabookTextMuted)
+                        }
+                    }
+
+                    Text(
+                        text = "Please enter their contact details so we can add them to your parties list.",
+                        fontSize = 12.sp,
+                        color = KhatabookTextMuted,
+                        modifier = Modifier.padding(top = 4.dp, bottom = 14.dp)
+                    )
+
+                    val newCustomers = extractedRecords.filter { it.isSelected && it.isNewCustomer }
+                    
+                    LazyColumn(
+                        modifier = Modifier.weight(1f).padding(vertical = 4.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        itemsIndexed(newCustomers) { idx, rec ->
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = CardDefaults.cardColors(containerColor = Color(0xFFF9FAFB)),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, KhatabookBorderLight)
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp)) {
+                                    Text(
+                                        text = rec.customerCodeOrName,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 14.sp,
+                                        color = KhatabookTextDark
+                                    )
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    OutlinedTextField(
+                                        value = rec.newPhone,
+                                        onValueChange = { newPhone ->
+                                            val i = extractedRecords.indexOfFirst { it.id == rec.id }
+                                            if (i >= 0) extractedRecords[i] = rec.copy(newPhone = newPhone)
+                                        },
+                                        placeholder = { Text("Phone Number", fontSize = 12.sp) },
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                                        modifier = Modifier.fillMaxWidth().height(50.dp),
+                                        shape = RoundedCornerShape(6.dp)
+                                    )
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    OutlinedTextField(
+                                        value = rec.newAddress,
+                                        onValueChange = { newAddr ->
+                                            val i = extractedRecords.indexOfFirst { it.id == rec.id }
+                                            if (i >= 0) extractedRecords[i] = rec.copy(newAddress = newAddr)
+                                        },
+                                        placeholder = { Text("Billing Address", fontSize = 12.sp) },
+                                        modifier = Modifier.fillMaxWidth().height(50.dp),
+                                        shape = RoundedCornerShape(6.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    
+                    Spacer(modifier = Modifier.height(14.dp))
+                    
+                    BounceButton(
+                        onClick = {
+                            val active = extractedRecords.filter { it.isSelected }
+                            onBulkLedgerUpdate(active, sheetDate)
+                            onDismiss()
+                        },
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = KhatabookGotGreen),
+                        modifier = Modifier.fillMaxWidth().height(48.dp)
+                    ) {
+                        Text(
+                            text = "SAVE CUSTOMERS & SYNC",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp
+                        )
+                    }
                 }
             }
         }
     }
 }
+}
 
-fun uriToMultipart(context: Context, uri: Uri): MultipartBody.Part? {
+private const val SCAN_IMAGE_JPEG_QUALITY = 85
+
+/**
+ * Creates a fresh cache-file Uri for a full-resolution camera capture, via
+ * the FileProvider already declared in AndroidManifest.xml/file_paths.xml.
+ * TakePicture() (unlike the old TakePicturePreview()) needs this Uri up
+ * front — it writes the real photo there instead of returning a thumbnail
+ * through Binder extras.
+ */
+fun createCameraImageUri(context: Context): Uri {
+    val imagesDir = File(context.cacheDir, "images").apply { mkdirs() }
+    val file = File(imagesDir, "camera_${UUID.randomUUID()}.jpg")
+    val uri = FileProvider.getUriForFile(context, "com.example.khatabook.fileprovider", file)
+
+    // ActivityResultContracts.TakePicture() does not itself grant the
+    // camera app write access to this Uri — grantUriPermissions="true" on
+    // the <provider> only makes the provider capable of having permission
+    // granted, it does not grant it to whoever receives the capture intent.
+    // Without this, some camera apps report success while having written
+    // nothing, and the subsequent decode fails with nothing to explain why.
+    val captureIntent = Intent(MediaStore.ACTION_IMAGE_CAPTURE)
+    val resolvedActivities = context.packageManager.queryIntentActivities(
+        captureIntent, PackageManager.MATCH_DEFAULT_ONLY,
+    )
+    for (info in resolvedActivities) {
+        context.grantUriPermission(
+            info.activityInfo.packageName, uri, Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+        )
+    }
+
+    return uri
+}
+
+/**
+ * Longest edge a decoded scan image is bounded to. Gemini's own image
+ * preprocessing downsamples well below this for extraction anyway, so this
+ * is not a quality tradeoff for OCR — it exists to bound peak memory during
+ * [BitmapFactory.decodeStream], which previously ran at the source's full
+ * resolution with no limit at all. A modern phone camera (108MP+, common on
+ * mid-range 2024+ devices) decoded uncompressed is comfortably capable of an
+ * [OutOfMemoryError] on this path — an `Error`, not an `Exception`, so it
+ * would not have been caught by this function's own `catch (e: Exception)`
+ * and would have crashed the app instead of surfacing [uploadError].
+ */
+private const val SCAN_MAX_DIMENSION = 2200
+
+/** The smallest power-of-2 [BitmapFactory.Options.inSampleSize] that brings
+ *  the source's longer edge at or under [SCAN_MAX_DIMENSION] — chosen so the
+ *  downsampling happens *during* decode (bounding peak memory), not as a
+ *  second allocate-then-shrink pass after a full-resolution decode already
+ *  happened. */
+private fun scanSampleSize(sourceWidth: Int, sourceHeight: Int): Int {
+    var sampleSize = 1
+    while (maxOf(sourceWidth, sourceHeight) / sampleSize > SCAN_MAX_DIMENSION) {
+        sampleSize *= 2
+    }
+    return sampleSize
+}
+
+/**
+ * Shared by both the camera and gallery pickers. Previously the camera path
+ * captured only a low-resolution preview thumbnail, and the gallery path
+ * uploaded the picked file completely unprocessed — mislabeled as
+ * image/jpeg regardless of its real format (HEIC is a common default on
+ * modern phones). This decodes bounded to [SCAN_MAX_DIMENSION] (see its doc
+ * comment), corrects EXIF rotation so a sideways photo doesn't defeat
+ * extraction, and always re-encodes as genuine JPEG — so the label sent to
+ * the backend is never a lie regardless of the source file's actual format.
+ */
+private const val SCAN_TAG = "SmartAiScanner"
+
+fun processImageUriForUpload(context: Context, uri: Uri): MultipartBody.Part? {
     return try {
-        val inputStream = context.contentResolver.openInputStream(uri) ?: return null
+        val orientation = context.contentResolver.openInputStream(uri)?.use { stream ->
+            ExifInterface(stream).getAttributeInt(
+                ExifInterface.TAG_ORIENTATION,
+                ExifInterface.ORIENTATION_NORMAL,
+            )
+        } ?: ExifInterface.ORIENTATION_NORMAL
+
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        context.contentResolver.openInputStream(uri)?.use { stream ->
+            BitmapFactory.decodeStream(stream, null, bounds)
+        }
+        val decodeOptions = BitmapFactory.Options().apply {
+            inSampleSize = scanSampleSize(bounds.outWidth, bounds.outHeight)
+        }
+
+        val decodedBitmap = context.contentResolver.openInputStream(uri)?.use { stream ->
+            BitmapFactory.decodeStream(stream, null, decodeOptions)
+        }
+        if (decodedBitmap == null) {
+            Log.e(SCAN_TAG, "Could not decode image at $uri — file missing, unreadable, or not a real image")
+            return null
+        }
+
+        val rotatedBitmap = applyExifRotation(decodedBitmap, orientation)
+
         val tempFile = File(context.cacheDir, "scan_${UUID.randomUUID()}.jpg")
-        val outputStream = FileOutputStream(tempFile)
-        inputStream.copyTo(outputStream)
-        outputStream.close()
-        inputStream.close()
+        FileOutputStream(tempFile).use { out ->
+            rotatedBitmap.compress(Bitmap.CompressFormat.JPEG, SCAN_IMAGE_JPEG_QUALITY, out)
+        }
+
+        if (rotatedBitmap !== decodedBitmap) rotatedBitmap.recycle()
+        decodedBitmap.recycle()
+
         val requestFile = tempFile.asRequestBody("image/jpeg".toMediaTypeOrNull())
         MultipartBody.Part.createFormData("image", tempFile.name, requestFile)
     } catch (e: Exception) {
+        Log.e(SCAN_TAG, "Failed to process image at $uri", e)
         null
     }
 }
 
-fun bitmapToMultipart(context: Context, bitmap: Bitmap): MultipartBody.Part? {
-    return try {
-        val tempFile = File(context.cacheDir, "scan_${UUID.randomUUID()}.jpg")
-        val outputStream = FileOutputStream(tempFile)
-        bitmap.compress(Bitmap.CompressFormat.JPEG, 90, outputStream)
-        outputStream.flush()
-        outputStream.close()
-        val requestFile = tempFile.asRequestBody("image/jpeg".toMediaTypeOrNull())
-        MultipartBody.Part.createFormData("image", tempFile.name, requestFile)
-    } catch (e: Exception) {
-        null
+/** Camera/gallery JPEGs are frequently stored as upright pixels plus an EXIF
+ *  rotation flag rather than pre-rotated — decoding without correcting this
+ *  would send Gemini a sideways image and defeat extraction accuracy. */
+private fun applyExifRotation(bitmap: Bitmap, orientation: Int): Bitmap {
+    val matrix = Matrix()
+    when (orientation) {
+        ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+        ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+        ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
+        ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.postScale(-1f, 1f)
+        ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.postScale(1f, -1f)
+        else -> return bitmap
     }
+    return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
 }

@@ -37,7 +37,11 @@ class PartiesScreenTest {
 
     @Test
     fun businessHeader_isDisplayed() {
-        composeTestRule.onNodeWithText("Shop 1 (Rajesh Kirana)").assertIsDisplayed()
+        // This rule supplies no `businesses` list, so PartiesScreen falls back
+        // to its placeholder BusinessAccount("My Business") — the header renders
+        // just the business name now, with no parenthetical owner suffix (that
+        // was from an old, invented two-shop demo default that no longer exists).
+        composeTestRule.onNodeWithText("My Business").assertIsDisplayed()
     }
 
     @Test

@@ -8,6 +8,7 @@ import com.example.khatabook.data.model.PartyType
 import com.example.khatabook.data.model.TransactionType
 import com.example.khatabook.data.repository.KhatabookRepository
 import kotlinx.coroutines.runBlocking
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -47,7 +48,13 @@ class BusinessSwitchingInstrumentedTest {
 
     @Before
     fun setUp(): Unit = runBlocking {
+        // "khatabook_repository_prefs" (no suffix) is the legacy plaintext
+        // file from before the EncryptedSharedPreferences migration —
+        // KhatabookRepository actually reads/writes
+        // "khatabook_repository_prefs_enc" for everything, so clearing only
+        // the old name left state persisting across test methods.
         context.getSharedPreferences("khatabook_repository_prefs", 0).edit().clear().commit()
+        context.getSharedPreferences("khatabook_repository_prefs_enc", 0).edit().clear().commit()
 
         token = InstrumentationRegistry.getArguments().getString("authToken")
         assertNotNull("pass -e authToken <jwt>", token)
@@ -71,6 +78,14 @@ class BusinessSwitchingInstrumentedTest {
         businessB = b.body()!!.id
 
         assertTrue(repo.loadBusinesses())
+    }
+
+    @After
+    fun tearDown(): Unit = runBlocking {
+        // NetworkClient is a process-wide singleton reconfigured by the next
+        // test's setUp() — without this, a straggler background flush from
+        // this test's repo can still be executing when the next test starts.
+        repo.cancelBackgroundWorkForTesting()
     }
 
     @Test

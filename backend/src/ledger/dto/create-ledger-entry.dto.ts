@@ -1,4 +1,5 @@
 import {
+  IsBoolean,
   IsIn,
   IsNumber,
   IsOptional,
@@ -52,4 +53,14 @@ export class CreateLedgerEntryDto {
   @IsOptional()
   @IsIn(['MANUAL', 'OCR'])
   source?: 'MANUAL' | 'OCR';
+
+  /**
+   * Client's "Send transaction SMS" toggle at the moment this entry was
+   * created. Omitted entirely by any client that predates this field, which
+   * LedgerService treats identically to `true` — the send-unconditionally
+   * behavior every existing app build already relies on.
+   */
+  @IsOptional()
+  @IsBoolean()
+  notifyCustomer?: boolean;
 }

@@ -16,7 +16,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.DateRange
-import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -26,7 +25,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.khatabook.data.api.NetworkClient
 import com.example.khatabook.ui.theme.*
 
 /** ISO-8601 UTC lower bound for a period label. */
@@ -52,60 +50,54 @@ private fun statisticsStartDate(period: String): String {
 @Composable
 fun BusinessStatisticsScreen(
     onBackClick: () -> Unit,
+    repository: com.example.khatabook.data.repository.KhatabookRepository,
     modifier: Modifier = Modifier
 ) {
     var selectedPeriod by remember { mutableStateOf("This Month") } // "This Month", "This Year", "All Time"
     val scrollState = rememberScrollState()
 
-    // Real figures. These were three hardcoded Quintuples, including invented
-    // "top customer" names that corresponded to nobody in the user's data.
-    var cashCollectedState by remember { mutableStateOf(0.0) }
-    var creditGivenState by remember { mutableStateOf(0.0) }
-    var netFlowState by remember { mutableStateOf(0.0) }
-    var totalTxnsState by remember { mutableStateOf(0) }
-    var topCustomerState by remember { mutableStateOf<String?>(null) }
-    var isLoading by remember { mutableStateOf(true) }
+    // Cashflow totals: repository-cached, short-lived (see CASHFLOW_TTL_MS).
+    // The "top customer"/"total transactions" figures reuse the same
+    // business-wide ledger feed cache CashbookScreen renders from, filtered
+    // to the period locally rather than fetched again with its own date
+    // range — one cache, not two overlapping ones.
+    val cashflow by repository.cashflowReport.collectAsState()
+    val feed by repository.businessLedgerFeed.collectAsState()
+    var isLoading by remember { mutableStateOf(cashflow == null) }
     var loadError by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(selectedPeriod) {
-        isLoading = true
+        isLoading = repository.cashflowReport.value == null
         loadError = null
-        try {
-            val from = statisticsStartDate(selectedPeriod)
-            val cashflow = NetworkClient.apiService.getCashflow(startDate = from)
-            val feed = NetworkClient.apiService.getBusinessLedger(from = from)
-
-            val body = cashflow.body()
-            if (cashflow.isSuccessful && body != null) {
-                cashCollectedState = body.totalIn
-                creditGivenState = body.totalOut
-                netFlowState = body.net
-            } else {
-                loadError = when (cashflow.code()) {
-                    401 -> "Session expired. Please log in again."
-                    403 -> "You do not have permission to view statistics."
-                    else -> "Could not load statistics (HTTP ${cashflow.code()})."
-                }
-            }
-
-            val rows = feed.body()
-            if (feed.isSuccessful && rows != null) {
-                totalTxnsState = rows.size
-                // Whoever accounts for the most received money in the period.
-                topCustomerState = rows
-                    .filter { it.type == "GOT" }
-                    .groupBy { it.party?.name }
-                    .mapNotNull { (name, entries) ->
-                        name?.let { it to entries.sumOf { e -> e.amount } }
-                    }
-                    .maxByOrNull { it.second }
-                    ?.first
-            }
-        } catch (e: Exception) {
+        val from = statisticsStartDate(selectedPeriod)
+        val ok = repository.syncCashflow(startDate = from)
+        repository.syncBusinessLedgerFeed()
+        if (!ok && repository.cashflowReport.value == null) {
+            // Only surface an error when there is nothing cached to fall back
+            // on — a failed background refresh over an existing cache is not
+            // something the user needs to be told about.
             loadError = "Could not reach the server. Check your connection."
-        } finally {
-            isLoading = false
         }
+        isLoading = false
+    }
+
+    val cashCollectedState = cashflow?.totalIn ?: 0.0
+    val creditGivenState = cashflow?.totalOut ?: 0.0
+    val netFlowState = cashflow?.net ?: 0.0
+
+    val periodStart = remember(selectedPeriod) { statisticsStartDate(selectedPeriod) }
+    val periodRows = remember(feed, periodStart) { feed.filter { it.createdAt >= periodStart } }
+    val totalTxnsState = periodRows.size
+    // Whoever accounts for the most received money in the period.
+    val topCustomerState = remember(periodRows) {
+        periodRows
+            .filter { it.type == "GOT" }
+            .groupBy { it.party?.name }
+            .mapNotNull { (name, entries) ->
+                name?.let { it to entries.sumOf { e -> e.amount } }
+            }
+            .maxByOrNull { it.second }
+            ?.first
     }
 
     Scaffold(
@@ -119,11 +111,9 @@ fun BusinessStatisticsScreen(
                                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
                             }
                         },
-                        actions = {
-                            BounceIconButton(onClick = {}) {
-                                Icon(Icons.Default.Share, contentDescription = "Share", tint = Color.White)
-                            }
-                        },
+                        // Share action removed: there was no sharing implementation
+                        // behind it (no PDF/text export wired up for this screen),
+                        // so tapping it silently did nothing.
                         colors = TopAppBarDefaults.topAppBarColors(containerColor = KhatabookHeaderBlue)
                     )
                 }

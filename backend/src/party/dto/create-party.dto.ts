@@ -1,12 +1,17 @@
 import {
   IsBoolean,
   IsIn,
+  IsInt,
   IsNotEmpty,
+  IsNumber,
   IsOptional,
   IsString,
   IsUUID,
   Matches,
+  Max,
   MaxLength,
+  Min,
+  ValidateIf,
 } from 'class-validator';
 
 export class CreatePartyDto {
@@ -80,4 +85,30 @@ export class CreatePartyDto {
   @IsOptional()
   @IsBoolean()
   isShippingSame?: boolean;
+
+  /**
+   * All optional and independent of any predefined period — a rate applies
+   * exactly to whatever interestPeriodValue/interestPeriodUnit says, never
+   * annualized or converted. rate/period are only required to be meaningful
+   * (>0) when interestEnabled is explicitly true, so a client that omits
+   * interest entirely (every existing app build) is unaffected.
+   */
+  @IsOptional()
+  @IsBoolean()
+  interestEnabled?: boolean;
+
+  @ValidateIf((dto) => dto.interestEnabled === true)
+  @IsNumber()
+  @Min(0)
+  @Max(1000)
+  interestRate?: number;
+
+  @ValidateIf((dto) => dto.interestEnabled === true)
+  @IsInt()
+  @Min(1)
+  interestPeriodValue?: number;
+
+  @ValidateIf((dto) => dto.interestEnabled === true)
+  @IsIn(['DAYS', 'MONTHS'])
+  interestPeriodUnit?: 'DAYS' | 'MONTHS';
 }

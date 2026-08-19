@@ -40,13 +40,18 @@ fun SettingsScreen(
     onDeleteKhataClick: () -> Unit = {},
     onChangeLanguageClick: () -> Unit = {},
     onLogoutClick: () -> Unit = {},
+    onHelpSupportClick: () -> Unit = {},
+    onAboutUsClick: () -> Unit = {},
     isAppLockEnabled: Boolean,
     onToggleAppLock: (Boolean, String?) -> Unit,
     isProfileLockEnabled: Boolean = false,
     profileLockPin: String = "",
     onToggleProfileLock: (Boolean, String?) -> Unit = { _, _ -> },
+    /** Business deletion is scoped to the actual owner server-side. */
+    canDeleteBusiness: Boolean = true,
     modifier: Modifier = Modifier
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     var showPinDialog by remember { mutableStateOf(false) }
     var showChangePasswordDialog by remember { mutableStateOf(false) }
 
@@ -223,16 +228,20 @@ fun SettingsScreen(
 
                     HorizontalDivider(color = KhatabookBorderLight)
 
-                    SettingsItemRow(
-                        title = "Delete Khata",
-                        onClick = onDeleteKhataClick
-                    )
+                    if (canDeleteBusiness) {
+                        SettingsItemRow(
+                            title = "Delete Khata",
+                            onClick = onDeleteKhataClick
+                        )
 
-                    HorizontalDivider(color = KhatabookBorderLight)
+                        HorizontalDivider(color = KhatabookBorderLight)
+                    }
 
                     SettingsItemRow(
                         title = "App Update",
-                        onClick = {}
+                        onClick = {
+                            android.widget.Toast.makeText(context, "You're using the latest version", android.widget.Toast.LENGTH_SHORT).show()
+                        }
                     )
                 }
             }
@@ -248,14 +257,14 @@ fun SettingsScreen(
                 Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)) {
                     SettingsItemRow(
                         title = "Help & Support",
-                        onClick = {}
+                        onClick = onHelpSupportClick
                     )
 
                     HorizontalDivider(color = KhatabookBorderLight)
 
                     SettingsItemRow(
                         title = "About Us",
-                        onClick = {}
+                        onClick = onAboutUsClick
                     )
                 }
             }

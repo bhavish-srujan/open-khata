@@ -43,7 +43,9 @@ fun EntryDetailsDialog(
     entry: LedgerEntry,
     onDismiss: () -> Unit,
     onEditEntry: (entryId: String, newAmount: Double, newNote: String) -> Unit,
-    onDeleteEntry: (entryId: String) -> Unit
+    onDeleteEntry: (entryId: String) -> Unit,
+    /** OWNER/MANAGER only, matching the server's own restriction on edit/delete. */
+    canManage: Boolean = true
 ) {
     var isEditing by remember { mutableStateOf(false) }
     var editAmountText by remember { mutableStateOf(entry.amount.toInt().toString()) }
@@ -52,6 +54,18 @@ fun EntryDetailsDialog(
     val isGave = entry.type == TransactionType.GAVE
     val amountColor = if (isGave) KhatabookGiveRed else KhatabookGotGreen
     val dateStr = SimpleDateFormat("dd MMM yy • hh:mm a", Locale.getDefault()).format(Date(entry.createdAt))
+
+    val context = androidx.compose.ui.platform.LocalContext.current
+    // Previously this card's heading always read the hardcoded literal "SMS
+    // disabled" regardless of the real setting, and showed a fabricated
+    // "Sent by..." line plus a fake khatabook.com link that went nowhere —
+    // this reads the same business-scoped setting SmsSettingsScreen actually
+    // saves (see KhatabookRepository's addLedgerEntry, which reads the
+    // identical key when this entry's SMS was originally sent).
+    val smsEnabled = remember(party.businessId) {
+        context.getSharedPreferences("sms_settings", android.content.Context.MODE_PRIVATE)
+            .getBoolean("send_transaction_sms_${party.businessId}", true)
+    }
 
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -149,8 +163,8 @@ fun EntryDetailsDialog(
 
                         HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp), color = KhatabookBorderLight)
 
-                        // EDIT ENTRY Button Form
-                        if (!isEditing) {
+                        // EDIT ENTRY Button Form — OWNER/MANAGER only
+                        if (!isEditing && canManage) {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -163,7 +177,7 @@ fun EntryDetailsDialog(
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text("EDIT ENTRY", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = KhatabookHeaderBlue)
                             }
-                        } else {
+                        } else if (isEditing) {
                             Column(modifier = Modifier.fillMaxWidth()) {
                                 Text("Edit Logged Amount & Note", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = KhatabookHeaderBlue)
                                 Spacer(modifier = Modifier.height(8.dp))
@@ -217,7 +231,9 @@ fun EntryDetailsDialog(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                // Card 2: SMS Disabled Info matching Screenshot
+                // Card 2: SMS status — reflects the real per-business setting now,
+                // not a hardcoded "disabled" label, and no longer claims a fake
+                // delivery record or links to a URL that was never real.
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp),
@@ -228,16 +244,18 @@ fun EntryDetailsDialog(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.Message, contentDescription = null, tint = KhatabookTextMuted, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("SMS disabled", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = KhatabookTextDark)
+                            Text(
+                                if (smsEnabled) "Transaction SMS enabled" else "Transaction SMS disabled",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = KhatabookTextDark
+                            )
                         }
 
                         HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp), color = KhatabookBorderLight)
 
                         Text("You ${if (isGave) "gave" else "got"}: ₹ ${entry.amount.toInt()}", fontSize = 13.sp, color = KhatabookTextMuted)
                         Text("Balance: -(₹ ${party.currentBalance.toInt()})", fontSize = 13.sp, color = KhatabookTextMuted)
-                        Text("Sent by: Khatabook Ledger Collection (${party.phone})", fontSize = 13.sp, color = KhatabookTextMuted)
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text("Details: https://khatabook.com/t/2lRh2zAA9Ow", fontSize = 12.sp, color = KhatabookHeaderBlue)
                     }
                 }
 
@@ -286,37 +304,46 @@ fun EntryDetailsDialog(
                         .padding(horizontal = 14.dp, vertical = 12.dp),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    BounceOutlinedButton(
-                        onClick = {
-                            onDeleteEntry(entry.id)
-                            onDismiss()
-                        },
-                        shape = RoundedCornerShape(8.dp),
-                        colors = ButtonDefaults.outlinedButtonColors(containerColor = Color.White),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, KhatabookGiveRed),
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(48.dp)
-                            .bounceClick {
+                    if (canManage) {
+                        BounceOutlinedButton(
+                            onClick = {
                                 onDeleteEntry(entry.id)
                                 onDismiss()
+                            },
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(containerColor = Color.White),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, KhatabookGiveRed),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.DeleteOutline, contentDescription = null, tint = KhatabookGiveRed, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("DELETE", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = KhatabookGiveRed)
                             }
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.DeleteOutline, contentDescription = null, tint = KhatabookGiveRed, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("DELETE", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = KhatabookGiveRed)
                         }
                     }
 
                     BounceButton(
-                        onClick = onDismiss,
+                        onClick = {
+                            // Previously wired to onDismiss — tapping "SHARE" only
+                            // closed the dialog, sharing nothing. This opens the
+                            // system share sheet with a plain-text summary instead.
+                            val shareText = "${party.name} ${if (isGave) "gave" else "got"} ₹ ${entry.amount.toInt()} on $dateStr" +
+                                (entry.note.takeIf { it.isNotBlank() }?.let { "\nNote: $it" } ?: "") +
+                                "\nBalance: ₹ ${party.currentBalance.toInt()}"
+                            val shareIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                                type = "text/plain"
+                                putExtra(android.content.Intent.EXTRA_TEXT, shareText)
+                            }
+                            context.startActivity(android.content.Intent.createChooser(shareIntent, "Share entry"))
+                        },
                         shape = RoundedCornerShape(8.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = KhatabookHeaderBlue),
                         modifier = Modifier
                             .weight(1f)
                             .height(48.dp)
-                            .bounceClick { onDismiss() }
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.Share, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))

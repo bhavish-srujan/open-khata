@@ -15,6 +15,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Remove
@@ -29,7 +30,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.khatabook.data.api.LedgerFeedEntry
-import com.example.khatabook.data.api.NetworkClient
+import com.example.khatabook.data.model.Party
+import com.example.khatabook.data.model.TransactionType
 import com.example.khatabook.ui.components.ItemPopIn
 import com.example.khatabook.ui.components.bounceClick
 import com.example.khatabook.ui.theme.*
@@ -63,6 +65,18 @@ private fun LedgerFeedEntry.toCashbookEntry(): LocalCashbookEntry = LocalCashboo
 @Composable
 fun CashbookScreen(
     onBackClick: () -> Unit,
+    /** The active business's parties, so a cash entry can be attributed to one. */
+    parties: List<Party>,
+    /**
+     * Records a real transaction via [com.example.khatabook.data.repository.KhatabookRepository.addLedgerEntry]
+     * — the same persistent, Outbox-backed flow every other entry point in the
+     * app uses. Cash In/Cash Out entries used to be appended to a purely
+     * local, in-memory list that was never sent anywhere and vanished the
+     * next time this screen loaded.
+     */
+    onAddEntry: (partyId: String, amount: Double, type: TransactionType, note: String) -> Unit,
+    onViewReportClick: () -> Unit = {},
+    repository: com.example.khatabook.data.repository.KhatabookRepository,
     modifier: Modifier = Modifier
 ) {
     // Removed redundant BackHandler; MainActivity handles navStack popping centrally
@@ -70,31 +84,27 @@ fun CashbookScreen(
     var showAddCashInDialog by remember { mutableStateOf(false) }
     var showAddCashOutDialog by remember { mutableStateOf(false) }
 
-    // Real business-wide ledger feed. These were three fabricated rows before.
-    val entries = remember { mutableStateListOf<LocalCashbookEntry>() }
-    var isLoading by remember { mutableStateOf(true) }
+    // Repository-cached business-wide ledger feed: whatever was cached (or
+    // optimistically patched by a create/edit/delete elsewhere in the app)
+    // renders immediately, while syncBusinessLedgerFeed() refreshes it in the
+    // background. This used to be a bare NetworkClient call on every visit,
+    // with a blocking spinner and nothing shown offline.
+    val feed by repository.businessLedgerFeed.collectAsState()
+    val entries = feed.map { it.toCashbookEntry() }
+    var isLoading by remember { mutableStateOf(feed.isEmpty()) }
     var loadError by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
-        isLoading = true
+        isLoading = feed.isEmpty()
         loadError = null
-        try {
-            val response = NetworkClient.apiService.getBusinessLedger()
-            val body = response.body()
-            if (response.isSuccessful && body != null) {
-                entries.clear()
-                entries.addAll(body.map { it.toCashbookEntry() })
-            } else {
-                loadError = when (response.code()) {
-                    401 -> "Session expired. Please log in again."
-                    else -> "Could not load the cashbook (HTTP ${response.code()})."
-                }
-            }
-        } catch (e: Exception) {
+        val ok = repository.syncBusinessLedgerFeed()
+        if (!ok && feed.isEmpty()) {
+            // Only surface an error when there is nothing cached to fall back
+            // on — a failed background refresh over an existing cache is not
+            // something the user needs to be told about.
             loadError = "Could not reach the server. Check your connection."
-        } finally {
-            isLoading = false
         }
+        isLoading = false
     }
 
     val totalCashIn = remember(entries) { entries.filter { it.isCashIn }.sumOf { it.amount } }
@@ -137,7 +147,7 @@ fun CashbookScreen(
                         onClick = { showAddCashOutDialog = true },
                         shape = RoundedCornerShape(8.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = KhatabookGiveRed),
-                        modifier = Modifier.weight(1f).height(48.dp).bounceClick { showAddCashOutDialog = true }
+                        modifier = Modifier.weight(1f).height(48.dp)
                     ) {
                         Icon(Icons.Default.Remove, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
@@ -148,7 +158,7 @@ fun CashbookScreen(
                         onClick = { showAddCashInDialog = true },
                         shape = RoundedCornerShape(8.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = KhatabookGotGreen),
-                        modifier = Modifier.weight(1f).height(48.dp).bounceClick { showAddCashInDialog = true }
+                        modifier = Modifier.weight(1f).height(48.dp)
                     ) {
                         Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
@@ -192,7 +202,9 @@ fun CashbookScreen(
                         HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp), color = KhatabookBorderLight)
 
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable(onClick = onViewReportClick),
                             horizontalArrangement = Arrangement.Center,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -267,25 +279,83 @@ fun CashbookScreen(
     if (showAddCashInDialog || showAddCashOutDialog) {
         var amountText by remember { mutableStateOf("") }
         var noteText by remember { mutableStateOf("") }
+        var amountError by remember { mutableStateOf<String?>(null) }
+        var selectedParty by remember { mutableStateOf<Party?>(null) }
+        var partyError by remember { mutableStateOf<String?>(null) }
+        var showPartyMenu by remember { mutableStateOf(false) }
         val isCashIn = showAddCashInDialog
 
+        fun close() {
+            showAddCashInDialog = false
+            showAddCashOutDialog = false
+        }
+
         AlertDialog(
-            onDismissRequest = {
-                showAddCashInDialog = false
-                showAddCashOutDialog = false
-            },
+            onDismissRequest = { close() },
             title = { Text(if (isCashIn) "Add Cash In Entry" else "Add Cash Out Entry", fontWeight = FontWeight.Bold) },
             text = {
                 Column {
+                    if (parties.isEmpty()) {
+                        Text(
+                            "Add a party first — every cash entry is recorded against one, the same as the rest of the ledger.",
+                            fontSize = 12.sp,
+                            color = KhatabookTextMuted
+                        )
+                    } else {
+                        Box {
+                            OutlinedTextField(
+                                value = selectedParty?.name ?: "",
+                                onValueChange = {},
+                                readOnly = true,
+                                label = { Text("Party") },
+                                isError = partyError != null,
+                                trailingIcon = {
+                                    Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+                                },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(8.dp)
+                            )
+                            // A readOnly OutlinedTextField still consumes touches for its own
+                            // focus/cursor handling, so a .clickable{} on the field itself never
+                            // fires. This transparent overlay intercepts the tap first.
+                            Box(
+                                modifier = Modifier
+                                    .matchParentSize()
+                                    .clickable { showPartyMenu = true }
+                            )
+                            DropdownMenu(expanded = showPartyMenu, onDismissRequest = { showPartyMenu = false }) {
+                                parties.forEach { p ->
+                                    DropdownMenuItem(
+                                        text = { Text(p.name) },
+                                        onClick = {
+                                            selectedParty = p
+                                            partyError = null
+                                            showPartyMenu = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                        if (partyError != null) {
+                            Text(partyError!!, color = KhatabookGiveRed, fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp))
+                        }
+                        Spacer(modifier = Modifier.height(10.dp))
+                    }
+
                     OutlinedTextField(
                         value = amountText,
-                        onValueChange = { amountText = it },
+                        onValueChange = { amountText = it; amountError = null },
                         label = { Text("Amount (₹)") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         singleLine = true,
+                        isError = amountError != null,
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(8.dp)
                     )
+                    if (amountError != null) {
+                        Text(amountError!!, color = KhatabookGiveRed, fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp))
+                    }
 
                     Spacer(modifier = Modifier.height(10.dp))
 
@@ -302,33 +372,32 @@ fun CashbookScreen(
             confirmButton = {
                 BounceButton(
                     onClick = {
-                        val amount = amountText.toDoubleOrNull() ?: 0.0
-                        if (amount > 0) {
-                            entries.add(0, LocalCashbookEntry("${entries.size + 1}", amount, isCashIn, noteText.ifBlank { if (isCashIn) "Cash In" else "Cash Out" }, "Just now"))
-                            showAddCashInDialog = false
-                            showAddCashOutDialog = false
+                        val amount = amountText.toDoubleOrNull()
+                        val party = selectedParty
+                        when {
+                            party == null -> partyError = "Select a party"
+                            amount == null -> amountError = "Enter a valid amount"
+                            amount <= 0 -> amountError = "Amount must be greater than zero"
+                            else -> {
+                                onAddEntry(
+                                    party.id,
+                                    amount,
+                                    if (isCashIn) TransactionType.GOT else TransactionType.GAVE,
+                                    noteText
+                                )
+                                close()
+                            }
                         }
                     },
                     colors = ButtonDefaults.buttonColors(
                         containerColor = if (isCashIn) KhatabookGotGreen else KhatabookGiveRed
-                    ),
-                    modifier = Modifier.bounceClick {
-                        val amount = amountText.toDoubleOrNull() ?: 0.0
-                        if (amount > 0) {
-                            entries.add(0, LocalCashbookEntry("${entries.size + 1}", amount, isCashIn, noteText.ifBlank { if (isCashIn) "Cash In" else "Cash Out" }, "Just now"))
-                            showAddCashInDialog = false
-                            showAddCashOutDialog = false
-                        }
-                    }
+                    )
                 ) {
                     Text("SAVE ENTRY", fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
-                BounceTextButton(onClick = {
-                    showAddCashInDialog = false
-                    showAddCashOutDialog = false
-                }) {
+                BounceTextButton(onClick = { close() }) {
                     Text("Cancel")
                 }
             }

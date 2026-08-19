@@ -22,12 +22,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalContext
-import com.example.khatabook.data.api.NetworkClient
 import com.example.khatabook.ui.theme.*
-import com.example.khatabook.utils.PdfGenerator
-import com.example.khatabook.data.model.Party
-import com.example.khatabook.data.model.PartyType
-import com.example.khatabook.data.model.LedgerEntry
 
 data class ReportItem(
     val title: String,
@@ -65,6 +60,7 @@ private fun startDateFor(period: String): String {
 @Composable
 fun ViewReportsScreen(
     onBackClick: () -> Unit,
+    repository: com.example.khatabook.data.repository.KhatabookRepository,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -72,38 +68,27 @@ fun ViewReportsScreen(
     var selectedCategory by remember { mutableStateOf("All") }
     val categories = listOf("All", "Customer", "Bills", "GST", "Day-wise", "Inventory", "Supplier")
 
-    // Real cashflow for the selected period. Refetches whenever the period
-    // changes; previously these were three hardcoded Triples.
-    var collected by remember { mutableStateOf(0.0) }
-    var creditGiven by remember { mutableStateOf(0.0) }
-    var netCashflow by remember { mutableStateOf(0.0) }
-    var isLoadingCashflow by remember { mutableStateOf(true) }
+    // Repository-cached, short-lived (see CASHFLOW_TTL_MS). Refetches
+    // whenever the period changes; renders whatever is cached immediately
+    // rather than a blocking spinner on every visit.
+    val cashflow by repository.cashflowReport.collectAsState()
+    val collected = cashflow?.totalIn ?: 0.0
+    val creditGiven = cashflow?.totalOut ?: 0.0
+    val netCashflow = cashflow?.net ?: 0.0
+    var isLoadingCashflow by remember { mutableStateOf(cashflow == null) }
     var cashflowError by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(selectedTimePeriod) {
-        isLoadingCashflow = true
+        isLoadingCashflow = repository.cashflowReport.value == null
         cashflowError = null
-        try {
-            val response = NetworkClient.apiService.getCashflow(
-                startDate = startDateFor(selectedTimePeriod)
-            )
-            val body = response.body()
-            if (response.isSuccessful && body != null) {
-                collected = body.totalIn
-                creditGiven = body.totalOut
-                netCashflow = body.net
-            } else {
-                cashflowError = when (response.code()) {
-                    401 -> "Session expired. Please log in again."
-                    403 -> "You do not have permission to view reports."
-                    else -> "Could not load reports (HTTP ${response.code()})."
-                }
-            }
-        } catch (e: Exception) {
+        val ok = repository.syncCashflow(startDate = startDateFor(selectedTimePeriod))
+        if (!ok && repository.cashflowReport.value == null) {
+            // Only surface an error when there is nothing cached to fall back
+            // on — a failed background refresh over an existing cache is not
+            // something the user needs to be told about.
             cashflowError = "Could not reach the server. Check your connection."
-        } finally {
-            isLoadingCashflow = false
         }
+        isLoadingCashflow = false
     }
 
     Scaffold(
@@ -129,15 +114,14 @@ fun ViewReportsScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Box(modifier = Modifier.padding(14.dp)) {
-                    BounceButton(
+                    BounceOutlinedButton(
                         onClick = {
-                            val dummyParty = Party(id = "dummy", name = "My Business", phone = "", type = PartyType.CUSTOMER)
-                            val dummyEntries = emptyList<LedgerEntry>()
-                            PdfGenerator.generateAndShareLedgerReport(context, dummyParty, dummyEntries)
+                            android.widget.Toast.makeText(context, "Coming soon", android.widget.Toast.LENGTH_SHORT).show()
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = KhatabookHeaderBlue),
+                        colors = ButtonDefaults.outlinedButtonColors(containerColor = Color.White, contentColor = KhatabookHeaderBlue),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, KhatabookHeaderBlue),
                         shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.fillMaxWidth().height(46.dp)
+                        modifier = Modifier.fillMaxWidth().height(48.dp)
                     ) {
                         Text("📄 DOWNLOAD FULL BUSINESS STATEMENT", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                     }
@@ -351,11 +335,14 @@ fun ReportGroupCard(
 
             Spacer(modifier = Modifier.height(6.dp))
 
+            // Rows are not individually clickable: none of these detailed
+            // reports (Stock Summary, P&L, etc.) has a destination screen
+            // built yet, so a `.clickable {}` here did nothing when tapped.
+            // These remain a summary list rather than a drill-down menu.
             items.forEachIndexed { idx, item ->
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { }
                         .padding(vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -365,7 +352,6 @@ fun ReportGroupCard(
                         Text(item.title, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = KhatabookTextDark)
                         Text(item.subtitle, fontSize = 11.sp, color = KhatabookTextMuted)
                     }
-                    Icon(Icons.Default.KeyboardArrowRight, contentDescription = null, tint = KhatabookTextMuted)
                 }
                 if (idx < items.size - 1) {
                     HorizontalDivider(color = KhatabookBorderLight)

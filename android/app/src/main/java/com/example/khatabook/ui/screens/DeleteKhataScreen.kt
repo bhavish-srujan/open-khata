@@ -27,6 +27,7 @@ fun DeleteKhataScreen(
 ) {
     var inputText by remember { mutableStateOf("") }
     val isValid = inputText.trim() == businessName.trim()
+    val context = androidx.compose.ui.platform.LocalContext.current
 
     Scaffold(
         topBar = {
@@ -79,8 +80,17 @@ fun DeleteKhataScreen(
 
             BounceButton(
                 onClick = {
+                    // Deleting a khata (moving its data to a Recycle Bin, per the
+                    // notice above) has no backend or Room support yet — see
+                    // RecycleBinScreen's own "DELETE ALL PERMANENTLY" button for the
+                    // same, established placeholder. Previously this called
+                    // onDeleteConfirmed() directly, which only navigated back
+                    // without deleting anything — the business, its parties and its
+                    // ledger entries were all left completely untouched, so a user
+                    // who typed the confirmation and tapped DELETE was told nothing
+                    // and had every reason to believe their data was gone.
                     if (isValid) {
-                        onDeleteConfirmed()
+                        android.widget.Toast.makeText(context, "Coming soon", android.widget.Toast.LENGTH_SHORT).show()
                     }
                 },
                 enabled = isValid,
@@ -93,11 +103,6 @@ fun DeleteKhataScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(48.dp)
-                    .bounceClick {
-                        if (isValid) {
-                            onDeleteConfirmed()
-                        }
-                    }
             ) {
                 Text(
                     text = "DELETE",

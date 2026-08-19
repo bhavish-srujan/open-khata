@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  releaseLan overlay: cleartext is permitted for exactly the dev machine's LAN
+  IP, for manual QA against a local backend before a real HTTPS production
+  URL exists. Every other domain still rejects cleartext outright, same as
+  the real `release` config — this is a scoped exception, not a blanket one.
+  Update the IP below if the dev machine's LAN address changes.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">10.113.145.153</domain>
+    </domain-config>
+</network-security-config>

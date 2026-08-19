@@ -3,12 +3,10 @@ package com.example.khatabook.ui.components
 import com.example.khatabook.ui.components.*
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -121,11 +119,12 @@ fun PaymentSettingsDialog(
 
             HorizontalDivider(color = KhatabookBorderLight)
 
-            // Row 3: Bank Accounts
+            // Row 3: Bank Accounts. Not clickable: there is no bank-account
+            // management screen behind it, so it's informational only rather
+            // than a `.clickable {}` that did nothing when tapped.
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { }
                     .padding(vertical = 14.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
@@ -144,16 +143,17 @@ fun PaymentSettingsDialog(
                         modifier = Modifier.padding(top = 2.dp)
                     )
                 }
-                Icon(Icons.Default.KeyboardArrowRight, contentDescription = null, tint = KhatabookHeaderBlue)
             }
 
             HorizontalDivider(color = KhatabookBorderLight)
 
-            // Row 4: Help
+            // Row 4: Help. Not clickable: PaymentSettingsDialog has no
+            // navigation callback wired in (only onDismiss), so there was
+            // nowhere for this to go — informational only rather than a
+            // `.clickable {}` that did nothing when tapped.
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { }
                     .padding(vertical = 14.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
@@ -172,7 +172,6 @@ fun PaymentSettingsDialog(
                         modifier = Modifier.padding(top = 2.dp)
                     )
                 }
-                Icon(Icons.Default.KeyboardArrowRight, contentDescription = null, tint = KhatabookHeaderBlue)
             }
         }
     }

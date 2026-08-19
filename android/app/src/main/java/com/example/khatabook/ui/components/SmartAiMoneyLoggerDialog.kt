@@ -27,7 +27,8 @@ import com.example.khatabook.data.model.TransactionType
 import com.example.khatabook.ui.theme.*
 
 data class ExtractedPaymentResult(
-    val party: Party,
+    val party: Party?,
+    val extractedName: String?,
     val amount: Double,
     val transactionType: TransactionType,
     val rawText: String
@@ -39,6 +40,7 @@ fun SmartAiMoneyLoggerDialog(
     parties: List<Party>,
     onDismiss: () -> Unit,
     onLogPaymentConfirmed: (partyId: String, amount: Double, type: TransactionType, note: String) -> Unit,
+    onNewCustomerDetected: (name: String, amount: Double, type: TransactionType, note: String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var aiInputText by remember { mutableStateOf("") }
@@ -74,10 +76,8 @@ fun SmartAiMoneyLoggerDialog(
                     party.name.split(" ").any { part -> part.length > 2 && text.contains(part, ignoreCase = true) }
         } ?: parties.firstOrNull()
 
-        if (matchedParty == null) {
-            errorMessage = "No matching customer found in your list"
-            return
-        }
+        val nameRegex = Regex("""([A-Za-z\s]+)(?:paid|gave|collected|received|took)""", RegexOption.IGNORE_CASE)
+        val extractedName = matchedParty?.name ?: nameRegex.find(text)?.groupValues?.get(1)?.trim() ?: "Unknown Customer"
 
         // 3. Extract transaction type (GOT = received/collected/paid, GAVE = gave/sent/lend)
         val textLower = text.lowercase()
@@ -92,6 +92,7 @@ fun SmartAiMoneyLoggerDialog(
 
         extractedResult = ExtractedPaymentResult(
             party = matchedParty,
+            extractedName = extractedName,
             amount = amount,
             transactionType = type,
             rawText = text
@@ -228,7 +229,11 @@ fun SmartAiMoneyLoggerDialog(
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
                                     Text("Customer:", fontSize = 12.sp, color = KhatabookTextDark)
-                                    Text(res.party.name, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = KhatabookTextDark)
+                                    if (res.party != null) {
+                                        Text(res.party.name, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = KhatabookTextDark)
+                                    } else {
+                                        Text("${res.extractedName} (New Customer)", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = KhatabookGiveRed)
+                                    }
                                 }
 
                                 Row(
@@ -272,7 +277,11 @@ fun SmartAiMoneyLoggerDialog(
                             val res = extractedResult!!
                             BounceButton(
                                 onClick = {
-                                    onLogPaymentConfirmed(res.party.id, res.amount, res.transactionType, res.rawText)
+                                    if (res.party != null) {
+                                        onLogPaymentConfirmed(res.party.id, res.amount, res.transactionType, res.rawText)
+                                    } else {
+                                        onNewCustomerDetected(res.extractedName ?: "", res.amount, res.transactionType, res.rawText)
+                                    }
                                     onDismiss()
                                 },
                                 shape = RoundedCornerShape(8.dp),
@@ -281,7 +290,7 @@ fun SmartAiMoneyLoggerDialog(
                                 ),
                                 modifier = Modifier.fillMaxWidth().height(44.dp)
                             ) {
-                                Text("CONFIRM & LOG MONEY INTO LEDGER", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                Text(if (res.party != null) "CONFIRM & LOG MONEY INTO LEDGER" else "ADD CUSTOMER & LOG MONEY", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                             }
                         }
                     }

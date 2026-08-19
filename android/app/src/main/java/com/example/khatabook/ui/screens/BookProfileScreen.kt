@@ -41,6 +41,8 @@ import androidx.security.crypto.MasterKey
 import coil.compose.AsyncImage
 import com.example.khatabook.ui.components.BounceIconButton
 import com.example.khatabook.ui.components.bounceClick
+import com.example.khatabook.data.repository.KhatabookRepository
+import kotlinx.coroutines.launch
 import com.example.khatabook.ui.theme.KhatabookBorderLight
 import com.example.khatabook.ui.theme.KhatabookGiveRed
 import com.example.khatabook.ui.theme.KhatabookHeaderBlue
@@ -165,7 +167,8 @@ private fun CategoryPickerDialog(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BookProfileScreen(
-    onBackClick: () -> Unit
+    onBackClick: () -> Unit,
+    repository: KhatabookRepository
 ) {
     val context = LocalContext.current
     val prefs = remember {
@@ -181,17 +184,21 @@ fun BookProfileScreen(
         )
     }
 
-    // ── Editable State ────────────────────────────────────────────
-    var userName          by remember { mutableStateOf(prefs.getString("user_name", "")          ?: "") }
-    var businessName      by remember { mutableStateOf(prefs.getString("business_name", "")      ?: "") }
-    var businessAddress   by remember { mutableStateOf(prefs.getString("business_address", "")   ?: "") }
-    var businessCategory  by remember { mutableStateOf(prefs.getString("business_category", "")  ?: "") }
-    var businessType      by remember { mutableStateOf(prefs.getString("business_type", "")      ?: "") }
-    var gstin             by remember { mutableStateOf(prefs.getString("gstin", "")              ?: "") }
-    var bankAccount       by remember { mutableStateOf(prefs.getString("bank_account", "")       ?: "") }
-    var profileImageUri   by remember { mutableStateOf(prefs.getString("profile_image_uri", null)) }
-    val registeredNumber   = prefs.getString("auth_phone", prefs.getString("registered_number", ""))
+    val scope = rememberCoroutineScope()
+
+    val activeBusiness by repository.activeBusiness.collectAsState(initial = null)
+    val registeredNumber = prefs.getString("auth_phone", prefs.getString("registered_number", ""))
                               ?.removePrefix("+91") ?: ""
+
+    // ── Editable State ────────────────────────────────────────────
+    var userName          by remember(registeredNumber) { mutableStateOf(prefs.getString("user_name_$registeredNumber", "User") ?: "User") }
+    var businessName      by remember(activeBusiness?.id) { mutableStateOf(activeBusiness?.name ?: "") }
+    var businessAddress   by remember(activeBusiness?.id) { mutableStateOf(activeBusiness?.address ?: "") }
+    var businessCategory  by remember(activeBusiness?.id) { mutableStateOf(activeBusiness?.category ?: "") }
+    var businessType      by remember(activeBusiness?.id) { mutableStateOf(activeBusiness?.type ?: "") }
+    var gstin             by remember(activeBusiness?.id) { mutableStateOf(activeBusiness?.gstNumber ?: "") }
+    var bankAccount       by remember(activeBusiness?.id) { mutableStateOf(activeBusiness?.bankAccount ?: "") }
+    var profileImageUri   by remember(activeBusiness?.id) { mutableStateOf(activeBusiness?.profileImageUrl) }
 
     // ── Dialog state ──────────────────────────────────────────────
     var editingField    by remember { mutableStateOf<String?>(null) }
@@ -204,13 +211,13 @@ fun BookProfileScreen(
     val galleryLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         uri?.let {
             profileImageUri = it.toString()
-            prefs.edit().putString("profile_image_uri", it.toString()).apply()
+            scope.launch { repository.updateBusinessProfile(profileImageUrl = it.toString()) }
         }
     }
     val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { success ->
         if (success && tempCameraUri != null) {
             profileImageUri = tempCameraUri.toString()
-            prefs.edit().putString("profile_image_uri", tempCameraUri.toString()).apply()
+            scope.launch { repository.updateBusinessProfile(profileImageUrl = tempCameraUri.toString()) }
         }
     }
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -249,7 +256,8 @@ fun BookProfileScreen(
             onDismiss = { editingField = null },
             onSave = { v ->
                 userName = v
-                prefs.edit().putString("user_name", v).apply()
+                prefs.edit().putString("user_name_$registeredNumber", v).apply()
+                scope.launch { repository.updateMe(v) }
                 editingField = null
             }
         )
@@ -258,7 +266,7 @@ fun BookProfileScreen(
             onDismiss = { editingField = null },
             onSave = { v ->
                 businessName = v
-                prefs.edit().putString("business_name", v).apply()
+                scope.launch { repository.updateBusinessProfile(name = v) }
                 editingField = null
             }
         )
@@ -268,7 +276,7 @@ fun BookProfileScreen(
             onDismiss = { editingField = null },
             onSave = { v ->
                 businessAddress = v
-                prefs.edit().putString("business_address", v).apply()
+                scope.launch { repository.updateBusinessProfile(address = v) }
                 editingField = null
             }
         )
@@ -278,7 +286,7 @@ fun BookProfileScreen(
             onDismiss = { editingField = null },
             onSave = { v ->
                 businessType = v
-                prefs.edit().putString("business_type", v).apply()
+                scope.launch { repository.updateBusinessProfile(type = v) }
                 editingField = null
             }
         )
@@ -289,7 +297,7 @@ fun BookProfileScreen(
             onDismiss = { editingField = null },
             onSave = { v ->
                 gstin = v
-                prefs.edit().putString("gstin", v).apply()
+                scope.launch { repository.updateBusinessProfile(gstNumber = v) }
                 editingField = null
             }
         )
@@ -300,7 +308,7 @@ fun BookProfileScreen(
             onDismiss = { editingField = null },
             onSave = { v ->
                 bankAccount = v
-                prefs.edit().putString("bank_account", v).apply()
+                scope.launch { repository.updateBusinessProfile(bankAccount = v) }
                 editingField = null
             }
         )
@@ -312,7 +320,7 @@ fun BookProfileScreen(
             onDismiss = { showCategoryPicker = false },
             onSave = { v ->
                 businessCategory = v
-                prefs.edit().putString("business_category", v).apply()
+                scope.launch { repository.updateBusinessProfile(category = v) }
                 showCategoryPicker = false
             }
         )
@@ -432,18 +440,6 @@ fun BookProfileScreen(
                         Text("${(strengthPct * 100).toInt()}%", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = strengthColor)
                     }
 
-                    // Banner
-                    Box(modifier = Modifier.fillMaxWidth().padding(16.dp).clip(RoundedCornerShape(8.dp))
-                        .background(KhatabookHeaderBlue).bounceClick {}) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            Text("Fill missing details for a FREE Business Card", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                            Spacer(Modifier.height(12.dp))
-                            Surface(shape = RoundedCornerShape(4.dp), color = Color.White) {
-                                Text("PROCEED", color = KhatabookTextDark, fontWeight = FontWeight.Bold, fontSize = 14.sp,
-                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
-                            }
-                        }
-                    }
                 }
             }
 
@@ -523,11 +519,14 @@ fun BookProfileScreen(
             }
 
             // ── Staff Info ────────────────────────────────────────
+            // showAddDetails = false: there is no staff-details destination
+            // wired from this screen, so the "Add Details" pill previously
+            // shown here did nothing when tapped.
             item { SectionHeader("Staff info") }
             item {
                 ProfileItemRow(
                     icon = Icons.Default.Person, title = "Details",
-                    subtitle = null, showAddDetails = true, onClick = {}
+                    subtitle = null, showAddDetails = false, onClick = {}
                 )
             }
 

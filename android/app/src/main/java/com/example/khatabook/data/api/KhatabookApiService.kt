@@ -15,12 +15,6 @@ data class VerifyOtpRequest(val phoneNumber: String, val otp: String)
 @Keep
 data class VerifyOtpResponse(val access_token: String, val is_new_user: Boolean)
 
-// ─── Reminders DTOs ─────────────────────────────────────────
-@Keep
-data class SendReminderRequest(val phoneNumber: String, val amount: Double, val partyName: String)
-@Keep
-data class SendReminderResponse(val success: Boolean, val message: String)
-
 // ─── Scanning DTOs ──────────────────────────────────────────
 @Keep
 data class ExtractedEntry(val customerName: String, val amount: Double)
@@ -37,7 +31,15 @@ data class PartyResponse(
     val gstin: String?,
     val currentBalance: Double,
     val businessId: String?,
-    val createdAt: String
+    val createdAt: String,
+    // Nullable rather than defaulted: an old backend response predating this
+    // feature simply omits these keys, and Gson leaves nullable fields null
+    // rather than failing to parse — the caller (toEntity) supplies the
+    // false/0/0/DAYS defaults.
+    val interestEnabled: Boolean? = null,
+    val interestRate: Double? = null,
+    val interestPeriodValue: Int? = null,
+    val interestPeriodUnit: String? = null
 )
 
 @Keep
@@ -51,9 +53,30 @@ data class CreatePartyRequest(
     val name: String,
     val phone: String,
     val type: String,
-    val gstin: String? = null
+    val gstin: String? = null,
     // No businessId: the server derives the real business from the JWT. The old
     // hardcoded "biz_1" was never a real id and was ignored server-side.
+    // Omitted (null) entirely when interest isn't configured, rather than sent
+    // as false/0/0/DAYS — the backend DTO defaults identically either way, and
+    // this keeps a plain create-with-no-interest request byte-for-byte the
+    // same as before this feature existed.
+    val interestEnabled: Boolean? = null,
+    val interestRate: Double? = null,
+    val interestPeriodValue: Int? = null,
+    val interestPeriodUnit: String? = null
+)
+
+/**
+ * A party's interest configuration, sent whole rather than as a patch of
+ * changed fields — the server assigns these absolute values, so a retried
+ * send from the Outbox converges on the same row instead of compounding.
+ */
+@Keep
+data class UpdatePartyInterestRequest(
+    val interestEnabled: Boolean,
+    val interestRate: Double,
+    val interestPeriodValue: Int,
+    val interestPeriodUnit: String
 )
 
 // ─── Ledger DTOs ─────────────────────────────────────────────
@@ -85,7 +108,12 @@ data class CreateLedgerEntryRequest(
     val type: String,        // "GAVE" or "GOT"
     val note: String = "",
     val paymentMethod: String = "Cash",
-    val source: String = "MANUAL"
+    val source: String = "MANUAL",
+    /** The "Send transaction SMS" toggle's value at creation time — the
+     *  single source of truth LedgerService gates its own SMS send on. Null
+     *  is never sent deliberately by this client; it exists only so an old
+     *  cached Outbox payload from before this field existed still decodes. */
+    val notifyCustomer: Boolean? = null
 )
 
 // ─── Business DTOs ───────────────────────────────────────────
@@ -96,13 +124,35 @@ data class BusinessResponse(
     val name: String,
     val type: String?,
     val gstNumber: String?,
-    val ownerId: String?
+    val ownerId: String?,
+    val address: String?,
+    val category: String?,
+    val bankAccount: String?,
+    val profileImageUrl: String?,
+    /** The caller's own role in this business: "OWNER", "MANAGER" or "CASHIER". */
+    val role: String? = null
 )
 
 @Keep
 data class CreateBusinessRequest(
     val name: String,
     val type: String? = null
+)
+
+@Keep
+data class UpdateBusinessRequest(
+    val name: String? = null,
+    val type: String? = null,
+    val gstNumber: String? = null,
+    val address: String? = null,
+    val category: String? = null,
+    val bankAccount: String? = null,
+    val profileImageUrl: String? = null
+)
+
+@Keep
+data class UpdateUserRequest(
+    val name: String? = null
 )
 
 // ─── Staff DTOs ──────────────────────────────────────────────
@@ -143,6 +193,22 @@ data class BillResponse(
     val created_at: String
 )
 
+@Keep
+data class CreateBillItemRequest(
+    val description: String,
+    val quantity: Double,
+    val price: Double,
+    val tax: Double? = null
+)
+
+@Keep
+data class CreateBillRequest(
+    val partyId: String,
+    val totalAmount: Double,
+    val items: List<CreateBillItemRequest>,
+    val isGst: Boolean? = null
+)
+
 // ─── Inventory DTOs ──────────────────────────────────────────
 @Keep
 data class InventoryItemResponse(
@@ -153,6 +219,16 @@ data class InventoryItemResponse(
     val purchasePrice: Double,
     val currentStock: Double,
     val lowStockThreshold: Double
+)
+
+@Keep
+data class CreateItemRequest(
+    val name: String,
+    val sku: String? = null,
+    val sellingPrice: Double? = null,
+    val purchasePrice: Double? = null,
+    val currentStock: Double? = null,
+    val lowStockThreshold: Double? = null
 )
 
 // ─── Cashbook feed DTOs ──────────────────────────────────────
@@ -189,10 +265,6 @@ interface KhatabookApiService {
     @POST("auth/logout")
     suspend fun logout(): Response<Unit>
 
-    // Reminders
-    @POST("api/v1/reminders/send")
-    suspend fun sendReminder(@Body body: SendReminderRequest): Response<SendReminderResponse>
-
     // Scanning
     @Multipart
     @POST("api/v1/scanning/extract")
@@ -203,26 +275,46 @@ interface KhatabookApiService {
     suspend fun getParties(@Query("type") type: String? = null): Response<List<PartyResponse>>
 
     @POST("api/v1/parties")
-    suspend fun createParty(@Body body: CreatePartyRequest): Response<PartyResponse>
+    suspend fun createParty(
+        @Body body: CreatePartyRequest,
+        @Header("x-business-id") businessId: String
+    ): Response<PartyResponse>
+
+    @PATCH("api/v1/parties/{id}/interest")
+    suspend fun updatePartyInterest(
+        @Path("id") id: String,
+        @Body body: UpdatePartyInterestRequest,
+        @Header("x-business-id") businessId: String
+    ): Response<PartyResponse>
 
     @DELETE("api/v1/parties/{id}")
-    suspend fun deleteParty(@Path("id") id: String): Response<Unit>
+    suspend fun deleteParty(
+        @Path("id") id: String,
+        @Header("x-business-id") businessId: String
+    ): Response<Unit>
 
     // Ledger
     @GET("api/v1/ledger/party/{partyId}")
     suspend fun getLedgerEntries(@Path("partyId") partyId: String): Response<List<LedgerEntryResponse>>
 
     @POST("api/v1/ledger")
-    suspend fun createLedgerEntry(@Body body: CreateLedgerEntryRequest): Response<LedgerEntryResponse>
+    suspend fun createLedgerEntry(
+        @Body body: CreateLedgerEntryRequest,
+        @Header("x-business-id") businessId: String
+    ): Response<LedgerEntryResponse>
 
     @PATCH("api/v1/ledger/{id}")
     suspend fun updateLedgerEntry(
         @Path("id") id: String,
-        @Body body: UpdateLedgerEntryRequest
+        @Body body: UpdateLedgerEntryRequest,
+        @Header("x-business-id") businessId: String
     ): Response<LedgerEntryResponse>
 
     @DELETE("api/v1/ledger/{id}")
-    suspend fun deleteLedgerEntry(@Path("id") id: String): Response<Unit>
+    suspend fun deleteLedgerEntry(
+        @Path("id") id: String,
+        @Header("x-business-id") businessId: String
+    ): Response<Unit>
 
     /**
      * Business-wide ledger feed for the cashbook. Null bounds are omitted from
@@ -252,6 +344,12 @@ interface KhatabookApiService {
     @POST("businesses")
     suspend fun createBusiness(@Body body: CreateBusinessRequest): Response<BusinessResponse>
 
+    @PUT("businesses/{id}")
+    suspend fun updateBusiness(@Path("id") id: String, @Body body: UpdateBusinessRequest): Response<BusinessResponse>
+
+    @PUT("users/me")
+    suspend fun updateMe(@Body body: UpdateUserRequest): Response<Unit>
+
     // Reports
     @GET("reports/cashflow")
     suspend fun getCashflow(
@@ -259,11 +357,32 @@ interface KhatabookApiService {
         @Query("endDate") endDate: String? = null
     ): Response<CashflowResponse>
 
+    /**
+     * Server-generated PDF statement (`ReportsController.downloadStatement` /
+     * `PdfService.generateBusinessStatement`) — business-wide when [partyId] is
+     * omitted, which is exactly the "Detailed Report" the Cashbook report
+     * screen downloads. `@Streaming` so the whole PDF is not buffered into
+     * memory as a single OkHttp response body before it can be written to disk.
+     */
+    @Streaming
+    @GET("reports/statement/pdf")
+    suspend fun downloadStatementPdf(
+        @Query("partyId") partyId: String? = null,
+        @Query("startDate") startDate: String? = null,
+        @Query("endDate") endDate: String? = null
+    ): Response<okhttp3.ResponseBody>
+
     // Bills
     @GET("bills")
     suspend fun getBills(): Response<List<BillResponse>>
 
+    @POST("bills")
+    suspend fun createBill(@Body body: CreateBillRequest): Response<BillResponse>
+
     // Inventory
     @GET("inventory")
     suspend fun getInventoryItems(): Response<List<InventoryItemResponse>>
+
+    @POST("inventory")
+    suspend fun createItem(@Body body: CreateItemRequest): Response<InventoryItemResponse>
 }

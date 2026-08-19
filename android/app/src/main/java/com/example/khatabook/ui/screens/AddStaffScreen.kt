@@ -32,42 +32,38 @@ fun AddStaffScreen(
     onAddStaffClick: () -> Unit,
     /** Bumped by the caller after a member is added, to force a refetch. */
     refreshKey: Int = 0,
+    repository: com.example.khatabook.data.repository.KhatabookRepository,
     modifier: Modifier = Modifier
 ) {
     val scrollState = rememberScrollState()
     val scope = rememberCoroutineScope()
 
-    // Real members of the active business. This screen previously showed only a
-    // static illustration and never contacted the server.
-    var staff by remember { mutableStateOf<List<StaffMemberResponse>>(emptyList()) }
-    var isLoading by remember { mutableStateOf(true) }
+    // Repository-cached: renders whatever was cached instantly, refreshes in
+    // the background. This screen previously called NetworkClient directly on
+    // every visit, with a blocking spinner and nothing shown offline.
+    val staff by repository.staff.collectAsState()
+    var isLoading by remember { mutableStateOf(staff.isEmpty()) }
     var loadError by remember { mutableStateOf<String?>(null) }
     var actionMessage by remember { mutableStateOf<String?>(null) }
     var pendingRemoval by remember { mutableStateOf<StaffMemberResponse?>(null) }
 
-    suspend fun reload() {
-        isLoading = true
+    suspend fun reload(force: Boolean = false) {
+        isLoading = staff.isEmpty()
         loadError = null
-        try {
-            val response = NetworkClient.apiService.getStaff()
-            val body = response.body()
-            if (response.isSuccessful && body != null) {
-                staff = body
-            } else {
-                loadError = when (response.code()) {
-                    401 -> "Session expired. Please log in again."
-                    403 -> "Only owners and managers can view staff."
-                    else -> "Could not load staff (HTTP " + response.code() + ")."
-                }
-            }
-        } catch (e: Exception) {
+        val ok = repository.syncStaff(force = force)
+        if (!ok && staff.isEmpty()) {
+            // Only surface an error when there is nothing cached to fall back
+            // on — a failed background refresh over an existing cache is not
+            // something the user needs to be told about.
             loadError = "Could not reach the server. Check your connection."
-        } finally {
-            isLoading = false
         }
+        isLoading = false
     }
 
-    LaunchedEffect(refreshKey) { reload() }
+    // refreshKey is bumped by the caller only after a member is actually
+    // added or removed — that bump, not the initial composition, is what
+    // needs to bypass the cache.
+    LaunchedEffect(refreshKey) { reload(force = refreshKey > 0) }
 
     Scaffold(
         topBar = {
@@ -120,7 +116,7 @@ fun AddStaffScreen(
                                 val res = NetworkClient.apiService.removeStaff(target.membershipId)
                                 when {
                                     res.isSuccessful -> {
-                                        reload()
+                                        reload(force = true)
                                         "Removed " + (target.name ?: target.phoneNumber)
                                     }
                                     res.code() == 400 -> "An owner cannot be removed."

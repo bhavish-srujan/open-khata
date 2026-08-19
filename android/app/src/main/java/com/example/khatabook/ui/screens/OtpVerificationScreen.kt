@@ -22,51 +22,120 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import com.example.khatabook.data.api.NetworkClient
 import com.example.khatabook.ui.theme.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import android.app.Activity
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.os.Build
-import android.telephony.SmsMessage
 import androidx.compose.ui.platform.LocalContext
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import com.google.android.gms.auth.api.phone.SmsRetriever
+import com.google.android.gms.common.api.CommonStatusCodes
+import com.google.android.gms.common.api.Status
 
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun OtpVerificationScreen(
     phoneNumber: String,
-    verificationId: String,
     onBackClick: () -> Unit,
     /** Returns the JWT access token and whether the user is new */
     onVerifySuccess: (accessToken: String, isNewUser: Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var otpCode by remember { mutableStateOf("") }
-    var timerSeconds by remember { mutableStateOf(30) }
-    var canResend by remember { mutableStateOf(false) }
+    var lastFailedOtp by remember { mutableStateOf<String?>(null) }
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    var failedAttempts by remember { mutableStateOf(0) }
+    var lockoutEndTime by remember { mutableStateOf(0L) }
+    var lockoutSecondsRemaining by remember { mutableStateOf(0) }
     val focusRequester = remember { FocusRequester() }
+    val keyboardController = LocalSoftwareKeyboardController.current
     val coroutineScope = rememberCoroutineScope()
 
-    LaunchedEffect(key1 = timerSeconds) {
-        if (timerSeconds > 0) {
+    // Requesting focus alone does not show the IME on most devices/keyboards
+    // when it's granted programmatically rather than from a direct tap — the
+    // keyboard must be told to show explicitly. The screen also enters via a
+    // Crossfade (AnimatedScreenTransition), so a short delay after requesting
+    // focus lets that settle before asking the IME to show, rather than racing it.
+    LaunchedEffect(Unit) {
+        focusRequester.requestFocus()
+        delay(100)
+        keyboardController?.show()
+    }
+
+    // Removed timer logic
+    LaunchedEffect(lockoutEndTime) {
+        while (lockoutEndTime > System.currentTimeMillis()) {
+            lockoutSecondsRemaining = ((lockoutEndTime - System.currentTimeMillis()) / 1000).toInt()
             delay(1000L)
-            timerSeconds--
-        } else {
-            canResend = true
+        }
+        lockoutSecondsRemaining = 0
+    }
+
+    // Auto-fill via the SMS User Consent API. Unlike RECEIVE_SMS/READ_SMS
+    // (which Play Store restricts heavily and mostly reserves for default
+    // SMS-handler apps), this needs no declared permission at all — Google
+    // Play Services itself watches for an incoming SMS matching this app's
+    // foreground request, then shows a one-time system dialog asking the
+    // user's explicit consent before handing this screen the message text.
+    // Denied consent, no matching SMS, or Play Services being unavailable
+    // all fail silently into the existing manual-entry flow, which was the
+    // only path before this and stays fully correct on its own.
+    val context = LocalContext.current
+
+    val consentLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val message = result.data?.getStringExtra(SmsRetriever.EXTRA_SMS_MESSAGE)
+            val extractedCode = message?.let { Regex("\\d{6}").find(it)?.value }
+            if (extractedCode != null) {
+                otpCode = extractedCode
+                errorMessage = null
+                lastFailedOtp = null
+            }
         }
     }
 
-    // No SMS auto-fill: the code now arrives over WhatsApp, which an app
-    // cannot read. The RECEIVE_SMS broadcast receiver that used to scrape it
-    // would never fire, and reading the user's inbox for a code we no longer
-    // send there is not something to keep on the off chance.
+    DisposableEffect(Unit) {
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(receiverContext: Context?, intent: Intent?) {
+                if (intent?.action != SmsRetriever.SMS_RETRIEVED_ACTION) return
+                val extras = intent.extras ?: return
+                val status = extras.get(SmsRetriever.EXTRA_STATUS) as? Status ?: return
+                if (status.statusCode == CommonStatusCodes.SUCCESS) {
+                    val consentIntent = extras.getParcelable<Intent>(SmsRetriever.EXTRA_CONSENT_INTENT)
+                    consentIntent?.let {
+                        try {
+                            consentLauncher.launch(it)
+                        } catch (_: Exception) {
+                            // Consent screen could not be launched — the user can
+                            // still type the code manually, same as always.
+                        }
+                    }
+                }
+            }
+        }
+        val filter = IntentFilter(SmsRetriever.SMS_RETRIEVED_ACTION)
+        androidx.core.content.ContextCompat.registerReceiver(
+            context,
+            receiver,
+            filter,
+            androidx.core.content.ContextCompat.RECEIVER_EXPORTED,
+        )
+        SmsRetriever.getClient(context).startSmsUserConsent(null)
+        onDispose {
+            context.unregisterReceiver(receiver)
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -107,7 +176,7 @@ fun OtpVerificationScreen(
                 color = KhatabookTextDark
             )
             Text(
-                text = "Enter the 6-digit code sent on WhatsApp to $phoneNumber",
+                text = "Enter the 6-digit code sent to $phoneNumber",
                 fontSize = 13.sp,
                 color = KhatabookTextMuted,
                 textAlign = TextAlign.Center,
@@ -122,7 +191,10 @@ fun OtpVerificationScreen(
                     .clickable(
                         interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
                         indication = null,
-                        onClick = { focusRequester.requestFocus() }
+                        onClick = {
+                            focusRequester.requestFocus()
+                            keyboardController?.show()
+                        }
                     )
             ) {
                 for (i in 0 until 6) {
@@ -158,7 +230,10 @@ fun OtpVerificationScreen(
                 onValueChange = {
                     if (it.length <= 6 && it.all { char -> char.isDigit() }) {
                         otpCode = it
-                        errorMessage = null
+                        if (it != lastFailedOtp) {
+                            errorMessage = null
+                            lastFailedOtp = null
+                        }
                     }
                 },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
@@ -166,8 +241,7 @@ fun OtpVerificationScreen(
                     .fillMaxWidth()
                     .height(1.dp)
                     .padding(0.dp)
-                    .focusRequester(focusRequester)
-                    .onGloballyPositioned { focusRequester.requestFocus() },
+                    .focusRequester(focusRequester),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = Color.Transparent,
                     unfocusedBorderColor = Color.Transparent
@@ -189,48 +263,45 @@ fun OtpVerificationScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Resend Timer Row
+            // Resend Row
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = if (timerSeconds > 0) "Resend OTP in ${timerSeconds}s" else "Didn't receive code?",
+                    text = "Didn't receive code?",
                     fontSize = 13.sp,
                     color = KhatabookTextMuted
                 )
-                if (canResend) {
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "RESEND",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = KhatabookHeaderBlue,
-                        modifier = Modifier.clickable {
-                            if (!isLoading) {
-                                timerSeconds = 30
-                                canResend = false
-                                otpCode = ""
-                                errorMessage = null
-                                isLoading = true
-                                coroutineScope.launch {
-                                    try {
-                                        val request = com.example.khatabook.data.api.RequestOtpRequest(phoneNumber)
-                                        val response = NetworkClient.apiService.requestOtp(request)
-                                        if (!response.isSuccessful || response.body()?.success != true) {
-                                            errorMessage = response.errorBody()?.string() ?: "Failed to resend OTP"
-                                            timerSeconds = 0
-                                            canResend = true
-                                        }
-                                    } catch (e: Exception) {
-                                        errorMessage = "Network error: ${e.message}"
-                                        timerSeconds = 0
-                                        canResend = true
-                                    } finally {
-                                        isLoading = false
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "RESEND",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = KhatabookHeaderBlue,
+                    modifier = Modifier.clickable {
+                        if (!isLoading) {
+                            otpCode = ""
+                            errorMessage = null
+                            // A fresh code means a fresh attempt budget: the server resets its
+                            // own counter on every new issue, and the client-side one must match
+                            // or a legitimate resend could still run into the old lockout.
+                            lastFailedOtp = null
+                            failedAttempts = 0
+                            isLoading = true
+                            coroutineScope.launch {
+                                try {
+                                    val request = com.example.khatabook.data.api.RequestOtpRequest(phoneNumber)
+                                    val response = NetworkClient.apiService.requestOtp(request)
+                                    if (!response.isSuccessful || response.body()?.success != true) {
+                                        errorMessage = com.example.khatabook.utils.parseApiErrorMessage(response.errorBody()?.string(), "Failed to resend OTP")
                                     }
+                                } catch (e: Exception) {
+                                    errorMessage = "Network error: ${e.message}"
+                                } finally {
+                                    isLoading = false
                                 }
                             }
                         }
-                    )
-                }
+                    }
+                )
             }
 
             Spacer(modifier = Modifier.height(24.dp))
@@ -245,12 +316,34 @@ fun OtpVerificationScreen(
                                 val request = com.example.khatabook.data.api.VerifyOtpRequest(phoneNumber, otpCode)
                                 val response = NetworkClient.apiService.verifyOtp(request)
                                 if (response.isSuccessful && response.body() != null) {
+                                    failedAttempts = 0
                                     val token = response.body()!!.access_token
                                     val isNewUser = response.body()!!.is_new_user
                                     onVerifySuccess(token, isNewUser)
                                 } else {
-                                    errorMessage = response.errorBody()?.string() ?: "Invalid OTP"
-                                    otpCode = ""
+                                    failedAttempts++
+                                    if (failedAttempts >= 5) {
+                                        val backoffSeconds = 30L * (1 shl (failedAttempts - 5).coerceAtMost(5))
+                                        lockoutEndTime = System.currentTimeMillis() + (backoffSeconds * 1000)
+                                        errorMessage = "Too many failed attempts. Try again in $backoffSeconds seconds."
+                                    } else {
+                                        // The server clears the code on expiry and on burning the
+                                        // last attempt, so both leave nothing left to verify —
+                                        // retyping digits can never succeed. Told apart from a
+                                        // plain wrong code, where the live code is still guessable.
+                                        val parsedMessage = com.example.khatabook.utils.parseApiErrorMessage(
+                                            response.errorBody()?.string(),
+                                            "Invalid OTP",
+                                        )
+                                        errorMessage = when {
+                                            parsedMessage.contains("expired", ignoreCase = true) ->
+                                                "This code has expired. Tap Resend to get a new one."
+                                            parsedMessage.contains("No OTP requested", ignoreCase = true) ->
+                                                "No active code for this number. Tap Resend to get a new one."
+                                            else -> parsedMessage
+                                        }
+                                    }
+                                    lastFailedOtp = otpCode
                                 }
                             } catch (e: Exception) {
                                 errorMessage = "Network error: ${e.message}"
@@ -260,7 +353,7 @@ fun OtpVerificationScreen(
                         }
                     }
                 },
-                enabled = otpCode.length == 6 && !isLoading,
+                enabled = otpCode.length == 6 && otpCode != lastFailedOtp && !isLoading && lockoutSecondsRemaining <= 0,
                 shape = RoundedCornerShape(10.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = KhatabookHeaderBlue,
@@ -268,21 +361,13 @@ fun OtpVerificationScreen(
                 ),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(48.dp)
+                    .height(56.dp)
             ) {
                 if (isLoading) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(20.dp),
-                        color = Color.White,
-                        strokeWidth = 2.dp
-                    )
+                    CircularProgressIndicator(color = Color.White, modifier = Modifier.size(24.dp))
                 } else {
-                    Text(
-                        text = "VERIFY & CONTINUE",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 15.sp,
-                        color = Color.White
-                    )
+                    val buttonText = if (lockoutSecondsRemaining > 0) "TRY AGAIN IN ${lockoutSecondsRemaining}S" else "VERIFY"
+                    Text(buttonText, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }

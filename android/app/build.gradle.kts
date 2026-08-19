@@ -2,7 +2,18 @@ plugins {
   alias(libs.plugins.android.application)
   alias(libs.plugins.kotlin.android)
   alias(libs.plugins.compose.compiler)
-  id("com.google.gms.google-services")
+  alias(libs.plugins.ksp)
+}
+
+// Load keystore credentials from keystore.properties (gitignored) with env-var
+// fallback so CI/CD pipelines can inject secrets without a local file.
+import java.io.FileInputStream
+import java.util.Properties
+
+val keystorePropertiesFile = rootProject.file("keystore.properties")
+val keystoreProperties = Properties()
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(FileInputStream(keystorePropertiesFile))
 }
 
 android {
@@ -18,11 +29,83 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        create("release") {
+            storeFile = file(keystoreProperties.getProperty("storeFile") ?: System.getenv("STORE_FILE") ?: "../keystore.jks")
+            storePassword = keystoreProperties.getProperty("storePassword") ?: System.getenv("STORE_PASSWORD") ?: ""
+            keyAlias = keystoreProperties.getProperty("keyAlias") ?: System.getenv("KEY_ALIAS") ?: ""
+            keyPassword = keystoreProperties.getProperty("keyPassword") ?: System.getenv("KEY_PASSWORD") ?: ""
+        }
+    }
+
+    // The production API URL is never checked in. It must be supplied at build
+    // time via -PapiBaseUrl=... or the API_BASE_URL env var, and it must be
+    // HTTPS — the release network security config rejects cleartext outright,
+    // so an http:// value would only fail at runtime instead of at build time.
+    //
+    // Read here (configuration time) but only *validated* in taskGraph.whenReady
+    // below: buildTypes {} blocks are evaluated for every build type on every
+    // invocation regardless of which task was requested, so throwing directly
+    // inside release {} would fail `assembleDebug` too.
+    val apiBaseUrl = (project.findProperty("apiBaseUrl") as String?) ?: System.getenv("API_BASE_URL")
+
     buildTypes {
+        debug {
+            // Emulator host-loopback alias, reachable without any device-specific
+            // setup. Real-device/LAN testing goes through the debug-only developer
+            // settings dialog (MobileAuthScreen), never through checked-in config.
+            buildConfigField("String", "API_BASE_URL", "\"http://10.0.2.2:3000/\"")
+        }
         release {
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
+            buildConfigField("String", "API_BASE_URL", "\"${apiBaseUrl ?: ""}\"")
+        }
+        // Signed like a real release (same keystore, minified) but points at a
+        // plain-HTTP LAN backend for on-device manual QA before a real HTTPS
+        // production URL exists. Intentionally a SEPARATE build type from
+        // `release` rather than a weakened version of it: `release`'s
+        // HTTPS-only guarantee (network_security_config.xml's blanket
+        // cleartextTrafficPermitted="false", and the build-time check below)
+        // is untouched, so this exists without softening what a true
+        // production release enforces. Remove this build type once a real
+        // HTTPS backend is available — it should not ship to real users.
+        create("releaseLan") {
+            initWith(getByName("release"))
+            matchingFallbacks += listOf("release")
+            val lanApiBaseUrl = (project.findProperty("lanApiBaseUrl") as String?) ?: System.getenv("LAN_API_BASE_URL")
+            buildConfigField("String", "API_BASE_URL", "\"${lanApiBaseUrl ?: ""}\"")
+        }
+    }
+
+    gradle.taskGraph.whenReady {
+        // Exactly "Release" tasks (assembleRelease, bundleRelease, ...) — not
+        // "ReleaseLan", which intentionally carries a cleartext LAN URL and is
+        // validated separately below.
+        val buildingRelease = allTasks.any { it.project == project && Regex("Release$").containsMatchIn(it.name) }
+        if (buildingRelease) {
+            if (apiBaseUrl.isNullOrBlank()) {
+                throw GradleException(
+                    "Release builds require the production API URL. Pass -PapiBaseUrl=https://your-api-host/ " +
+                        "or set the API_BASE_URL environment variable."
+                )
+            }
+            if (!apiBaseUrl.startsWith("https://")) {
+                throw GradleException(
+                    "apiBaseUrl/API_BASE_URL must be an HTTPS URL for release builds, got: $apiBaseUrl"
+                )
+            }
+        }
+
+        val buildingReleaseLan = allTasks.any { it.project == project && it.name.contains("ReleaseLan") }
+        if (buildingReleaseLan) {
+            val lanApiBaseUrl = (project.findProperty("lanApiBaseUrl") as String?) ?: System.getenv("LAN_API_BASE_URL")
+            if (lanApiBaseUrl.isNullOrBlank()) {
+                throw GradleException(
+                    "releaseLan builds require -PlanApiBaseUrl=http://<your-lan-ip>:3000/ or the LAN_API_BASE_URL env var."
+                )
+            }
         }
     }
     compileOptions {
@@ -53,6 +136,11 @@ android {
                 "-Dnet.bytebuddy.experimental=true"
             )
         }
+        // Robolectric needs the merged manifest/resources to bootstrap its
+        // shadow Android framework (Room's real SQLite implementation runs
+        // through it) — off by default, and Room/plain-JUnit tests that
+        // don't need it are unaffected either way.
+        unitTests.isIncludeAndroidResources = true
     }
 }
 
@@ -64,9 +152,18 @@ dependencies {
   // Multidex support
   implementation("androidx.multidex:multidex:2.0.1")
 
-  // Firebase
-  implementation(platform("com.google.firebase:firebase-bom:33.1.2"))
-  implementation("com.google.firebase:firebase-auth")
+  // Reads EXIF orientation so Scan Khata can correct sideways camera/gallery
+  // photos before sending them to Gemini — camera JPEGs are frequently
+  // stored "upright pixels + rotation flag" rather than pre-rotated.
+  implementation("androidx.exifinterface:exifinterface:1.3.7")
+
+  // Persistent local-first store: KhatabookRepository's primary working
+  // database (see data/local/). PostgreSQL remains the authoritative cloud
+  // copy; Room is the on-device source of truth for normal offline reads.
+  implementation(libs.androidx.room.runtime)
+  implementation(libs.androidx.room.ktx)
+  ksp(libs.androidx.room.compiler)
+  testImplementation(libs.androidx.room.testing)
 
   // Core Android & Material dependencies
   implementation("androidx.appcompat:appcompat:1.7.0")
@@ -97,6 +194,14 @@ dependencies {
   // Tests
   testImplementation(libs.junit)
   testImplementation(libs.kotlinx.coroutines.test)
+  // Shadows the Android framework (SQLite included) so tests that build a
+  // real, in-memory Room database can run as fast JVM unit tests instead of
+  // requiring a device/emulator — see the databaseFactory overrides in
+  // KhatabookRepositoryTest/CacheReconciliationTest/OutboxRollbackTest.
+  testImplementation(libs.robolectric)
+  // ApplicationProvider, used by InMemoryTestDatabase.kt to get a context
+  // Room can build against under Robolectric.
+  testImplementation(libs.androidx.test.core)
   androidTestImplementation(libs.androidx.test.core)
   androidTestImplementation(libs.androidx.test.ext.junit)
   androidTestImplementation(libs.androidx.test.espresso.core)
@@ -109,4 +214,8 @@ dependencies {
   implementation("com.squareup.retrofit2:retrofit:2.9.0")
   implementation("com.squareup.retrofit2:converter-gson:2.9.0")
   implementation("com.squareup.okhttp3:logging-interceptor:4.11.0")
+
+  // SMS User Consent API, for auto-filling the OTP screen without declaring
+  // the RECEIVE_SMS/READ_SMS permission Play Store restricts heavily.
+  implementation("com.google.android.gms:play-services-auth:21.3.0")
 }

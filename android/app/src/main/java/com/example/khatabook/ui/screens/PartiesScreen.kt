@@ -52,7 +52,6 @@ import com.example.khatabook.data.model.PartyType
 
 import com.example.khatabook.ui.components.EmphasizedSmoothEasing
 import com.example.khatabook.ui.components.LedgerSheetRecord
-import com.example.khatabook.ui.components.ProfileLockVerificationDialog
 import com.example.khatabook.ui.components.SmartAiSheetScannerDialog
 import com.example.khatabook.ui.components.bounceClick
 import com.example.khatabook.utils.SmsSender
@@ -66,8 +65,8 @@ fun PartiesScreen(
     businesses: List<BusinessAccount> = emptyList(),
     selectedBusinessId: String = "",
     profileLocksMap: Map<String, String> = emptyMap(),
-    onBusinessSelected: (BusinessAccount) -> Unit = {},
-    onAddNewBusinessClick: () -> Unit = {},
+    /** Opens the business switcher (MainActivity owns that dialog, including profile-lock verification). */
+    onBusinessHeaderClick: () -> Unit = {},
     onAddPartyClick: () -> Unit,
     onCashbookClick: () -> Unit,
     onViewReportsClick: () -> Unit,
@@ -76,6 +75,19 @@ fun PartiesScreen(
     onPartyClick: (Party) -> Unit,
     onDeleteParty: (partyId: String) -> Unit = {},
     onSheetRecordBulkSync: (records: List<LedgerSheetRecord>, date: String) -> Unit = { _, _ -> },
+    /** OWNER/MANAGER only, matching the server's own restriction on delete. */
+    canManageParty: Boolean = true,
+    /** Queued writes the server has permanently refused — not lost, but not delivered either. */
+    failedOperationCount: Int = 0,
+    onRetryFailedOperations: () -> Unit = {},
+    /**
+     * True while this account's first-ever cloud restore is in flight on
+     * this device (see KhatabookRepository.isRestoringFromCloud). An empty
+     * [parties] list while this is true means "not fetched yet", not "this
+     * business genuinely has none" — the empty state below must not claim
+     * the latter until this goes false.
+     */
+    isRestoringFromCloud: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     var selectedTab by remember { mutableStateOf(PartyType.CUSTOMER) }
@@ -117,7 +129,11 @@ fun PartiesScreen(
     val context = LocalContext.current
 
     // Derived state: does the active tab have any parties? (used to hide FAB on empty state)
-    val hasPartiesInCurrentTab by remember {
+    // Keyed on parties/selectedBusinessId too — they're plain parameters, not
+    // State, so a keyless derivedStateOf here would only ever read their
+    // first-composition values and never notice a party being added/removed
+    // without navigating away and back (which recreates this composable).
+    val hasPartiesInCurrentTab by remember(parties, selectedBusinessId) {
         derivedStateOf {
             parties.any { it.businessId == selectedBusinessId && it.type == selectedTab }
         }
@@ -156,6 +172,7 @@ fun PartiesScreen(
                             modifier = Modifier
                                 .weight(1f)
                                 .padding(vertical = 4.dp)
+                                .bounceClick { onBusinessHeaderClick() }
                         ) {
                             Icon(Icons.Default.Store, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(6.dp))
@@ -165,6 +182,12 @@ fun PartiesScreen(
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White
                             )
+                            Icon(
+                                Icons.Default.ArrowDropDown,
+                                contentDescription = "Switch business",
+                                tint = Color.White,
+                                modifier = Modifier.size(20.dp)
+                            )
                         }
 
                         // Cashbook Badge
@@ -173,7 +196,6 @@ fun PartiesScreen(
                                 .clip(CircleShape)
                                 .background(Color.White.copy(alpha = 0.25f))
                                 .bounceClick { onCashbookClick() }
-                                .clickable { onCashbookClick() }
                                 .padding(horizontal = 12.dp, vertical = 5.dp),
                             contentAlignment = Alignment.Center
                         ) {
@@ -298,6 +320,44 @@ fun PartiesScreen(
                 }
             }
 
+            // Sync issue banner: writes the server has permanently refused
+            // (most commonly a role no longer permitting an action) used to
+            // be recorded only in the outbox with no visible signal at all —
+            // this is the one place in the app that surfaces it.
+            if (failedOperationCount > 0) {
+                Surface(
+                    color = Color(0xFFFEF3C7),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = if (failedOperationCount == 1) {
+                                "1 change could not be saved to the server"
+                            } else {
+                                "$failedOperationCount changes could not be saved to the server"
+                            },
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color(0xFF92400E),
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            "RETRY",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = KhatabookHeaderBlue,
+                            modifier = Modifier.bounceClick { onRetryFailedOperations() }
+                        )
+                    }
+                }
+            }
+
             Spacer(modifier = Modifier.height(8.dp))
 
             // UNIFIED SEARCH RECTANGLE WITH FILTER BUTTON INSIDE ON THE RIGHT
@@ -325,21 +385,31 @@ fun PartiesScreen(
                                 label = "searchToXMorph"
                             ) { isSearching ->
                                 if (isSearching) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(24.dp)
-                                            .clip(CircleShape)
-                                            .background(KhatabookGiveRed.copy(alpha = 0.12f))
-                                            .bounceClick { searchQuery = "" }
-                                            .clickable { searchQuery = "" },
-                                        contentAlignment = Alignment.Center
+                                    // BounceIconButton, not a bare Box: gives this a
+                                    // real ~44dp touch target (the previous 24dp Box
+                                    // was also the click area itself, well under the
+                                    // recommended minimum) while keeping the same
+                                    // 24dp/15dp visual. Also drops the redundant
+                                    // .clickable{} stacked on top of .bounceClick{}
+                                    // doing the exact same thing.
+                                    BounceIconButton(
+                                        onClick = { searchQuery = "" },
+                                        modifier = Modifier.size(44.dp)
                                     ) {
-                                        Icon(
-                                            Icons.Default.Close,
-                                            contentDescription = "Clear Search",
-                                            tint = KhatabookGiveRed,
-                                            modifier = Modifier.size(15.dp)
-                                        )
+                                        Box(
+                                            modifier = Modifier
+                                                .size(24.dp)
+                                                .clip(CircleShape)
+                                                .background(KhatabookGiveRed.copy(alpha = 0.12f)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                Icons.Default.Close,
+                                                contentDescription = "Clear Search",
+                                                tint = KhatabookGiveRed,
+                                                modifier = Modifier.size(15.dp)
+                                            )
+                                        }
                                     }
                                 } else {
                                     Icon(
@@ -467,7 +537,35 @@ fun PartiesScreen(
                     }
                 }
 
-                if (listForTab.isEmpty()) {
+                if (listForTab.isEmpty() && isRestoringFromCloud) {
+                    // Local database not yet populated on this device — not
+                    // the same as "this business has no parties". See
+                    // KhatabookRepository.restoreFromCloudIfNeeded().
+                    Box(
+                        modifier = Modifier.fillMaxSize().padding(20.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            CircularProgressIndicator(color = KhatabookHeaderBlue)
+                            Spacer(modifier = Modifier.height(18.dp))
+                            Text(
+                                text = "Restoring your data…",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = KhatabookTextDark
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = "Fetching your parties and ledger from the cloud",
+                                fontSize = 12.sp,
+                                color = KhatabookTextMuted
+                            )
+                        }
+                    }
+                } else if (listForTab.isEmpty()) {
                     Box(
                         modifier = Modifier.fillMaxSize().padding(20.dp),
                         contentAlignment = Alignment.Center
@@ -538,9 +636,17 @@ fun PartiesScreen(
                             PartyItemRow(
                                 party = party,
                                 onClick = { onPartyClick(party) },
-                                onLongPress = { 
-                                    partyToDelete = party
-                                    showLongPressDeleteStep1 = true
+                                onLongPress = {
+                                    if (canManageParty) {
+                                        partyToDelete = party
+                                        showLongPressDeleteStep1 = true
+                                    } else {
+                                        android.widget.Toast.makeText(
+                                            context,
+                                            "Only owners and managers can delete parties",
+                                            android.widget.Toast.LENGTH_SHORT
+                                        ).show()
+                                    }
                                 },
                                 onRemindClick = { partyToRemind = party }
                             )
@@ -785,7 +891,7 @@ fun PartiesScreen(
                 onSmsClick = {
                     run {
                         val message = "Dear ${party.name}, your total outstanding balance is ₹ ${kotlin.math.abs(party.currentBalance).toInt()}. Please clear your dues on Khatabook."
-                        val toast = when (val result = SmsSender.send(context, party.phone, message)) {
+                        val toast = when (val result = SmsSender.send(context, party.phone, message, party.businessId)) {
                             is SmsSender.Result.Sent -> "Reminder sent to ${party.name}"
                             is SmsSender.Result.PermissionMissing -> "Allow SMS permission in Settings to send reminders"
                             is SmsSender.Result.Failed -> "Could not send: ${result.reason}"
@@ -802,6 +908,25 @@ fun PartiesScreen(
                         context.startActivity(whatsappIntent)
                     } catch (e: Exception) {
                         android.widget.Toast.makeText(context, "WhatsApp not found", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                    partyToRemind = null
+                },
+                onSendBulkReminders = {
+                    // Same real, local send used for a single party's
+                    // reminder above — applied to every customer in this
+                    // business who currently owes money.
+                    val owing = activeBusinessParties.filter {
+                        it.type == PartyType.CUSTOMER && it.currentBalance > 0
+                    }
+                    if (owing.isEmpty()) {
+                        android.widget.Toast.makeText(context, "No customers currently owe you money", android.widget.Toast.LENGTH_SHORT).show()
+                    } else {
+                        var sent = 0
+                        owing.forEach { p ->
+                            val message = "Dear ${p.name}, your total outstanding balance is ₹ ${kotlin.math.abs(p.currentBalance).toInt()}. Please clear your dues on Khatabook."
+                            if (SmsSender.send(context, p.phone, message, p.businessId) is SmsSender.Result.Sent) sent++
+                        }
+                        android.widget.Toast.makeText(context, "Reminders sent to $sent of ${owing.size} customers", android.widget.Toast.LENGTH_LONG).show()
                     }
                     partyToRemind = null
                 }
@@ -857,7 +982,9 @@ fun PartyItemRow(
                     text = party.name,
                     fontSize = 15.sp,
                     fontWeight = FontWeight.Bold,
-                    color = KhatabookTextDark
+                    color = KhatabookTextDark,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                 )
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 3.dp)) {
                     when (party.collectionFrequency) {
