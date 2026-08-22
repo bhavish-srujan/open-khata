@@ -17,6 +17,7 @@ import {
 import { PartyService } from './party.service';
 import { CreatePartyDto } from './dto/create-party.dto';
 import { UpdatePartyInterestDto } from './dto/update-party-interest.dto';
+import { UpdateCollectionFrequencyDto } from './dto/update-collection-frequency.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
@@ -82,6 +83,26 @@ export class PartyController {
   ) {
     const businessId = this.extractBusinessId(req, headers);
     return this.partyService.updateInterest(id, businessId, dto);
+  }
+
+  /**
+   * The party's Daily/Weekly/Monthly bucket. Open to every business member for
+   * the same reason as interest: it reclassifies a party for collection
+   * purposes and touches no balance or record.
+   */
+  @Patch(':id/collection-frequency')
+  updateCollectionFrequency(
+    @Req() req,
+    @Headers() headers,
+    @Param('id') id: string,
+    @Body() dto: UpdateCollectionFrequencyDto,
+  ) {
+    const businessId = this.extractBusinessId(req, headers);
+    return this.partyService.updateCollectionFrequency(
+      id,
+      businessId,
+      dto.collectionFrequency,
+    );
   }
 
   /**

@@ -916,12 +916,23 @@ class KhatabookRepository(
             val response = NetworkClient.apiService.getParties()
             if (response.isSuccessful) {
                 val remoteParties = response.body() ?: emptyList()
+                // This device's current classifications, keyed by party id. The
+                // server is authoritative for everything else, but it only
+                // learned about collection frequency recently: for a party
+                // created before that, the server sends null and this device
+                // holds the only copy. Taking the server's null as DAILY would
+                // silently reclassify a Weekly/Monthly party on the next sync.
+                val localFrequencies = _parties.value.associate { it.id to it.collectionFrequency }
                 val mapped = remoteParties.map { r ->
                     Party(
                         id = r.id,
                         name = r.name,
                         phone = r.phone,
                         type = if (r.type == "SUPPLIER") PartyType.SUPPLIER else PartyType.CUSTOMER,
+                        collectionFrequency = r.collectionFrequency
+                            ?.let { runCatching { CollectionFrequency.valueOf(it) }.getOrNull() }
+                            ?: localFrequencies[r.id]
+                            ?: CollectionFrequency.DAILY,
                         gstin = r.gstin ?: "",
                         currentBalance = r.currentBalance,
                         businessId = r.businessId ?: "",
@@ -1382,6 +1393,22 @@ class KhatabookRepository(
     val isRestoringFromCloud: StateFlow<Boolean> = _isRestoringFromCloud.asStateFlow()
 
     /**
+     * True when the last cloud restore attempt did not complete.
+     *
+     * Distinct from "restoring" and from "restored, and there is nothing
+     * here": a returning user whose restore failed must be told it failed and
+     * offered a retry, not shown an empty book that looks like data loss.
+     */
+    private val _restoreFailed = MutableStateFlow(false)
+    val restoreFailed: StateFlow<Boolean> = _restoreFailed.asStateFlow()
+
+    /** Clears the failure flag and attempts the restore again. */
+    suspend fun retryRestoreFromCloud(): Boolean {
+        _restoreFailed.value = false
+        return restoreFromCloudIfNeeded()
+    }
+
+    /**
      * Scanned rows that resemble more than one existing customer, held for the
      * user to resolve.
      *
@@ -1439,20 +1466,37 @@ class KhatabookRepository(
             // but is not this method's job to fabricate around) — still
             // marks completion below so this device stops re-attempting a
             // restore on every load for an account that genuinely has none.
+            // Whether the restore actually retrieved anything. Both of these
+            // swallow their own failures and report false, so their result has
+            // to be checked — see below for why that matters.
+            var partiesRestored = true
             if (activeBusinessId.isNotBlank()) {
-                syncPartiesFromServer()
+                partiesRestored = syncPartiesFromServer()
                 syncBusinessLedgerFeed(force = true)
             }
 
-            val existing = db.syncStateDao().getSync(activePhoneNumber)
-            db.syncStateDao().upsert(
-                SyncStateEntity(
-                    ownerPhone = activePhoneNumber,
-                    activeBusinessId = existing?.activeBusinessId ?: activeBusinessId,
-                    hasCompletedInitialSync = true,
-                ),
-            )
-            return gotBusinesses
+            // Only claim the initial sync is done when it genuinely is.
+            //
+            // This used to be set unconditionally. A returning user whose
+            // restore failed — no network, a server hiccup — was therefore
+            // marked as fully restored with zero rows: the app showed "No
+            // customers" as if their books were empty, and never retried,
+            // because this flag is what gates the retry. Leaving it unset on
+            // failure means the next launch (or a manual retry) restores
+            // properly instead.
+            val succeeded = gotBusinesses && partiesRestored
+            if (succeeded) {
+                val existing = db.syncStateDao().getSync(activePhoneNumber)
+                db.syncStateDao().upsert(
+                    SyncStateEntity(
+                        ownerPhone = activePhoneNumber,
+                        activeBusinessId = existing?.activeBusinessId ?: activeBusinessId,
+                        hasCompletedInitialSync = true,
+                    ),
+                )
+            }
+            _restoreFailed.value = !succeeded
+            return succeeded
         } finally {
             _isRestoringFromCloud.value = false
         }
@@ -1505,6 +1549,10 @@ class KhatabookRepository(
                         name = canonicalName,
                         phone = cleanedPhone,
                         type = type.name,
+                        // Sent so the classification survives a reinstall. It
+                        // was previously local-only, which is why restoring a
+                        // device put every party back under Daily.
+                        collectionFrequency = frequency.name,
                         // Omitted entirely (null) when interest isn't
                         // configured, so a plain create is byte-for-byte
                         // unchanged from before this feature existed.

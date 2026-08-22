@@ -94,14 +94,27 @@ fun PartyEntity.toDomain(): Party = Party(
 
 /** Maps a server PartyResponse straight to an entity, for sync writes that
  *  never round-trip through the [Party] domain model. */
-fun PartyResponse.toEntity(ownerPhone: String, resolvedBusinessId: String): PartyEntity = PartyEntity(
+fun PartyResponse.toEntity(
+    ownerPhone: String,
+    resolvedBusinessId: String,
+    /** This device's existing classification for the same party, if any. Used
+     *  only when the server has none — see the collectionFrequency mapping. */
+    localFallback: String? = null,
+): PartyEntity = PartyEntity(
     id = id,
     ownerPhone = ownerPhone,
     businessId = businessId ?: resolvedBusinessId,
     name = name,
     phone = phone,
     type = if (type == "SUPPLIER") PartyType.SUPPLIER.name else PartyType.CUSTOMER.name,
-    collectionFrequency = CollectionFrequency.DAILY.name,
+    // The server's own classification. This used to be hardcoded to DAILY,
+    // which is precisely why a restored device showed every party under Daily
+    // and left Weekly and Monthly empty. `localFallback` carries whatever this
+    // device already knew, so a server that has no value yet (a party created
+    // before the field existed) does not overwrite a correct local one.
+    collectionFrequency = collectionFrequency
+        ?: localFallback
+        ?: CollectionFrequency.DAILY.name,
     address = "",
     gstin = gstin ?: "",
     flatBuilding = "",

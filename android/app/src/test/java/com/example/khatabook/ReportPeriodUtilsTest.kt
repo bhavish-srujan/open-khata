@@ -33,6 +33,15 @@ class ReportPeriodUtilsTest {
     }
 
     @Test
+    fun `the single-day filter is labelled Today, matching the range it covers`() {
+        // The range above is today's midnight-to-midnight, but the chip used to
+        // read "Single Day", which described the shape of the range rather than
+        // which day it covered and so looked like an unset filter. Pinned here
+        // so the label and the range cannot drift apart again.
+        assertEquals("Today", ReportPeriod.SINGLE_DAY.label)
+    }
+
+    @Test
     fun `last week is the 7 days before today, inclusive of today`() {
         val range = ReportPeriodUtils.rangeFor(ReportPeriod.LAST_WEEK, now = fixedNow())
         assertEquals("2026-08-07T00:00:00.000Z", range.startIso)

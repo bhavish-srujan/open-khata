@@ -108,6 +108,15 @@ export class CreatePartyDto {
   isShippingSame?: boolean;
 
   /**
+   * The user's Daily/Weekly/Monthly classification for this party. Optional so
+   * older clients (which never sent it) keep working; the service defaults to
+   * DAILY, which is exactly how such a party already behaved.
+   */
+  @IsOptional()
+  @IsIn(['DAILY', 'WEEKLY', 'MONTHLY'])
+  collectionFrequency?: 'DAILY' | 'WEEKLY' | 'MONTHLY';
+
+  /**
    * All optional and independent of any predefined period — a rate applies
    * exactly to whatever interestPeriodValue/interestPeriodUnit says, never
    * annualized or converted. rate/period are only required to be meaningful

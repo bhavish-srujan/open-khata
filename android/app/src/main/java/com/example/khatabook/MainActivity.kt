@@ -305,6 +305,7 @@ class MainActivity : AppCompatActivity() {
                     val entries by repository.ledgerEntries.collectAsState()
                     val failedOperationCount by repository.failedOperationCountFlow.collectAsState()
                     val isRestoringFromCloud by repository.isRestoringFromCloud.collectAsState()
+                    val restoreFailed by repository.restoreFailed.collectAsState()
 
                     fun normalizePhoneForKey(value: String): String {
                         val digits = value.replace(Regex("\\D"), "")
@@ -741,6 +742,10 @@ class MainActivity : AppCompatActivity() {
                                         selectedBusinessId = selectedBusinessId,
                                         profileLocksMap = profileLocksMap,
                                         isRestoringFromCloud = isRestoringFromCloud,
+                                        restoreFailed = restoreFailed,
+                                        onRetryRestore = {
+                                            partiesScope.launch { repository.retryRestoreFromCloud() }
+                                        },
                                         // Opens the existing BusinessSwitcherDialog below, which already
                                         // handles selection (with profile-lock verification) and creating
                                         // a new business — this was previously unreachable from any screen.

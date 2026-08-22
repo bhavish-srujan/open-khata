@@ -88,6 +88,14 @@ fun PartiesScreen(
      * the latter until this goes false.
      */
     isRestoringFromCloud: Boolean = false,
+    /**
+     * True when the last restore attempt failed. Kept separate from
+     * [isRestoringFromCloud] and from "no parties": showing the normal empty
+     * state after a failed restore tells a returning user their books are
+     * gone, when in fact nothing was ever fetched.
+     */
+    restoreFailed: Boolean = false,
+    onRetryRestore: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var selectedTab by remember { mutableStateOf(PartyType.CUSTOMER) }
@@ -550,6 +558,41 @@ fun PartiesScreen(
                                 fontSize = 12.sp,
                                 color = KhatabookTextMuted
                             )
+                        }
+                    }
+                } else if (listForTab.isEmpty() && restoreFailed) {
+                    // Explicitly NOT the empty state. Nothing was fetched, so
+                    // claiming "No customers" here would read as data loss to
+                    // someone who has hundreds.
+                    Box(
+                        modifier = Modifier.fillMaxSize().padding(20.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Text(
+                                text = "Couldn't load your data",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = KhatabookTextDark
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = "Your parties are safe in the cloud. Check your connection and try again.",
+                                fontSize = 12.sp,
+                                color = KhatabookTextMuted,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            )
+                            Spacer(modifier = Modifier.height(16.dp))
+                            BounceButton(
+                                onClick = onRetryRestore,
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = KhatabookHeaderBlue)
+                            ) {
+                                Text("RETRY", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color.White)
+                            }
                         }
                     }
                 } else if (listForTab.isEmpty()) {

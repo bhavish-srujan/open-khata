@@ -38,6 +38,14 @@ data class PartyResponse(
     val currentBalance: Double,
     val businessId: String?,
     val createdAt: String,
+    /**
+     * The party's Daily/Weekly/Monthly bucket.
+     *
+     * Null means the server has no value for this row (created before the
+     * field existed) — which is NOT the same as DAILY. The client keeps its
+     * own local classification in that case rather than downgrading it.
+     */
+    val collectionFrequency: String? = null,
     // Nullable rather than defaulted: an old backend response predating this
     // feature simply omits these keys, and Gson leaves nullable fields null
     // rather than failing to parse — the caller (toEntity) supplies the
@@ -60,6 +68,9 @@ data class CreatePartyRequest(
     val phone: String,
     val type: String,
     val gstin: String? = null,
+    /** The user's collection classification, sent so it survives a reinstall.
+     *  Previously local-only, which is why restore emptied Weekly/Monthly. */
+    val collectionFrequency: String? = null,
     // No businessId: the server derives the real business from the JWT. The old
     // hardcoded "biz_1" was never a real id and was ignored server-side.
     // Omitted (null) entirely when interest isn't configured, rather than sent

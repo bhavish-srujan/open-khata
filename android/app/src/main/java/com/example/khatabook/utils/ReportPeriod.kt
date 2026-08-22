@@ -7,7 +7,11 @@ import java.util.TimeZone
 
 enum class ReportPeriod(val label: String) {
     THIS_MONTH("This Month"),
-    SINGLE_DAY("Single Day"),
+    /** Today. The constant is named SINGLE_DAY for historical reasons, but the
+     *  range it produces has always been start-of-today to end-of-today — the
+     *  old "Single Day" label just described the shape of the range rather
+     *  than which day it covers, which read as an unset filter. */
+    SINGLE_DAY("Today"),
     LAST_WEEK("Last Week"),
     LAST_MONTH("Last Month"),
     ALL("All"),
@@ -27,7 +31,7 @@ data class DateRange(val startIso: String, val endIso: String)
  * library desugaring is not enabled (same constraint as the existing
  * `startDateFor` helper in ViewReportsScreen.kt, which this generalizes and
  * extends with end-of-range bounds and the extra periods the Cashbook report
- * needs — Single Day / Last Week / Last Month / a validated custom range —
+ * needs — Today / Last Week / Last Month / a validated custom range —
  * so both screens can share one implementation instead of two).
  */
 object ReportPeriodUtils {

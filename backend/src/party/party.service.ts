@@ -79,6 +79,9 @@ export class PartyService {
       // Absent stays absent — never substituted with a placeholder number.
       phone: dto.phone?.trim() ?? '',
       type: dto.type,
+      // The client's own classification. DAILY only when the client did not
+      // send one (older builds) — never inferred from dates or activity.
+      collectionFrequency: dto.collectionFrequency ?? 'DAILY',
       gstin: dto.gstin,
       businessId,
       currentBalance: 0,
@@ -152,6 +155,25 @@ export class PartyService {
       ? (dto.interestPeriodUnit ?? 'DAYS')
       : 'DAYS';
 
+    return this.partyRepository.save(party);
+  }
+
+  /**
+   * Sets a party's collection classification.
+   *
+   * Exists so a device that still holds the only copy of this value — every
+   * party created before the field reached the server — can push it up before
+   * that copy is lost to a reinstall. Assigning an absolute value keeps a
+   * retried send from the Outbox idempotent.
+   */
+  async updateCollectionFrequency(
+    id: string,
+    businessId: string,
+    collectionFrequency: 'DAILY' | 'WEEKLY' | 'MONTHLY',
+  ): Promise<Party> {
+    // Scoped find: a party in another business 404s rather than being edited.
+    const party = await this.findOne(id, businessId);
+    party.collectionFrequency = collectionFrequency;
     return this.partyRepository.save(party);
   }
 

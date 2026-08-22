@@ -42,6 +42,25 @@ export class Party {
   address: string;
 
   /**
+   * Which collection bucket this party belongs to — Daily, Weekly or Monthly.
+   *
+   * This is the user's own classification of the party, not anything derived
+   * from dates or activity. It previously existed only in the client's Room
+   * database and was never sent here, so restoring a device had nothing to
+   * restore it *from* and every party came back as DAILY.
+   *
+   * Defaults to DAILY, which is what a row without this information already
+   * behaved as, so existing parties are unchanged by its introduction.
+   */
+  @Column({
+    name: 'collection_frequency',
+    type: 'varchar',
+    length: 10,
+    default: 'DAILY',
+  })
+  collectionFrequency: 'DAILY' | 'WEEKLY' | 'MONTHLY';
+
+  /**
    * Interest configuration is per-party, optional, and never annualized or
    * auto-converted: interestRate applies as-is to whatever
    * interestPeriodValue/interestPeriodUnit says (e.g. "5% / 100 Days" means
