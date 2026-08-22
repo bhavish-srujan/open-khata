@@ -202,6 +202,11 @@ dependencies {
   // ApplicationProvider, used by InMemoryTestDatabase.kt to get a context
   // Room can build against under Robolectric.
   testImplementation(libs.androidx.test.core)
+  // Compose UI testing under Robolectric, so interaction bugs in a screen
+  // (a control that renders but does not respond) can be caught by the
+  // normal test run rather than only by someone tapping it on a device.
+  testImplementation(libs.androidx.compose.ui.test.junit4)
+  testImplementation(libs.androidx.compose.ui.test.manifest)
   androidTestImplementation(libs.androidx.test.core)
   androidTestImplementation(libs.androidx.test.ext.junit)
   androidTestImplementation(libs.androidx.test.espresso.core)
