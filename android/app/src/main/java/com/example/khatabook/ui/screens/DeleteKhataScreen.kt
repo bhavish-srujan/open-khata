@@ -54,7 +54,7 @@ fun DeleteKhataScreen(
                 .padding(20.dp)
         ) {
             Text(
-                text = "You are going to delete '$businessName'. All the data in this book on Khatabook and Cashbook will be moved to the Recycle Bin. If you have any entries in a book with the same name on Cashbook, we would advise you to download reports from Cashbook to backup your data.",
+                text = "You are going to delete '$businessName'. All the data in this book on Open Khata and Cashbook will be moved to the Recycle Bin. If you have any entries in a book with the same name on Cashbook, we would advise you to download reports from Cashbook to backup your data.",
                 fontSize = 14.sp,
                 color = KhatabookGiveRed,
                 lineHeight = 20.sp,

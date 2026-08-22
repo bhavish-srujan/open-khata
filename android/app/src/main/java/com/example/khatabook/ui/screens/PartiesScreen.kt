@@ -877,7 +877,7 @@ fun PartiesScreen(
                 onDismiss = { partyToRemind = null },
                 onSmsClick = {
                     run {
-                        val message = "Dear ${party.name}, your total outstanding balance is ₹ ${kotlin.math.abs(party.currentBalance).toInt()}. Please clear your dues on Khatabook."
+                        val message = "Dear ${party.name}, your total outstanding balance is ₹ ${kotlin.math.abs(party.currentBalance).toInt()}. Please clear your dues on Open Khata."
                         val toast = when (val result = SmsSender.send(context, party.phone, message, party.businessId)) {
                             is SmsSender.Result.Sent -> "Reminder sent to ${party.name}"
                             is SmsSender.Result.PermissionMissing -> "Allow SMS permission in Settings to send reminders"
@@ -889,7 +889,7 @@ fun PartiesScreen(
                 },
                 onWhatsappClick = {
                     try {
-                        val message = "Dear ${party.name}, your total outstanding balance is ₹ ${kotlin.math.abs(party.currentBalance).toInt()}. Please clear your dues on Khatabook."
+                        val message = "Dear ${party.name}, your total outstanding balance is ₹ ${kotlin.math.abs(party.currentBalance).toInt()}. Please clear your dues on Open Khata."
                         val encodedMessage = Uri.encode(message)
                         val whatsappIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://api.whatsapp.com/send?phone=${party.phone}&text=$encodedMessage"))
                         context.startActivity(whatsappIntent)
@@ -910,7 +910,7 @@ fun PartiesScreen(
                     } else {
                         var sent = 0
                         owing.forEach { p ->
-                            val message = "Dear ${p.name}, your total outstanding balance is ₹ ${kotlin.math.abs(p.currentBalance).toInt()}. Please clear your dues on Khatabook."
+                            val message = "Dear ${p.name}, your total outstanding balance is ₹ ${kotlin.math.abs(p.currentBalance).toInt()}. Please clear your dues on Open Khata."
                             if (SmsSender.send(context, p.phone, message, p.businessId) is SmsSender.Result.Sent) sent++
                         }
                         android.widget.Toast.makeText(context, "Reminders sent to $sent of ${owing.size} customers", android.widget.Toast.LENGTH_LONG).show()

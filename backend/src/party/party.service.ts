@@ -114,7 +114,7 @@ export class PartyService {
       // Customer-facing welcome message — transactional channel, not TextBee.
       await this.smsService.sendTransactionalSms(
         savedParty.phone,
-        `Welcome to ${businessName}! Your Khata Book account has been created.`,
+        `Welcome to ${businessName}! Your Open Khata account has been created.`,
       );
     }
 

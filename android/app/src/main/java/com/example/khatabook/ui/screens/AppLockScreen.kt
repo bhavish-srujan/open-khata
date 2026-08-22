@@ -72,7 +72,7 @@ fun AppLockScreen(
 
                 Spacer(modifier = Modifier.height(14.dp))
 
-                Text("Khatabook App Lock", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = KhatabookTextDark)
+                Text("Open Khata App Lock", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = KhatabookTextDark)
                 Text("Enter your 4-digit security PIN", fontSize = 12.sp, color = KhatabookTextMuted)
 
                 Spacer(modifier = Modifier.height(18.dp))

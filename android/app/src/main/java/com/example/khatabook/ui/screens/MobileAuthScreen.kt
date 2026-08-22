@@ -208,7 +208,7 @@ fun MobileAuthScreen(
             Spacer(modifier = Modifier.weight(1f))
 
             Text(
-                text = "By continuing, you agree to Khatabook's Terms of Service & Privacy Policy",
+                text = "By continuing, you agree to Open Khata's Terms of Service & Privacy Policy",
                 fontSize = 11.sp,
                 color = KhatabookTextMuted,
                 textAlign = TextAlign.Center,

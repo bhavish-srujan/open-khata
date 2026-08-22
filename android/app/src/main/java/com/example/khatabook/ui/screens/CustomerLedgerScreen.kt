@@ -295,7 +295,7 @@ fun CustomerLedgerScreen(
                         QuickActionButton(icon = Icons.Default.Message, label = "SMS", onClick = {
                             // Sent directly rather than opening the Messages app,
                             // which used to throw the user out of the ledger.
-                            val message = "Dear ${party.name}, your total outstanding balance is ₹ $balanceAmount. Please clear your dues on Khatabook."
+                            val message = "Dear ${party.name}, your total outstanding balance is ₹ $balanceAmount. Please clear your dues on Open Khata."
                             when (val result = SmsSender.send(context, party.phone, message, party.businessId)) {
                                 is SmsSender.Result.Sent ->
                                     Toast.makeText(context, "Reminder sent to ${party.name}", Toast.LENGTH_SHORT).show()
@@ -349,7 +349,7 @@ fun CustomerLedgerScreen(
             onDismiss = { showRemindBottomSheet = false },
             onSmsClick = {
                 run {
-                    val message = "Dear ${party.name}, your total outstanding balance is ₹ ${kotlin.math.abs(party.currentBalance).toInt()}. Please clear your dues on Khatabook."
+                    val message = "Dear ${party.name}, your total outstanding balance is ₹ ${kotlin.math.abs(party.currentBalance).toInt()}. Please clear your dues on Open Khata."
                     when (val result = SmsSender.send(context, party.phone, message, party.businessId)) {
                         is SmsSender.Result.Sent ->
                             Toast.makeText(context, "Reminder sent", Toast.LENGTH_SHORT).show()
@@ -363,7 +363,7 @@ fun CustomerLedgerScreen(
             },
             onWhatsappClick = {
                 try {
-                    val message = "Dear ${party.name}, your total outstanding balance is ₹ ${kotlin.math.abs(party.currentBalance).toInt()}. Please clear your dues on Khatabook."
+                    val message = "Dear ${party.name}, your total outstanding balance is ₹ ${kotlin.math.abs(party.currentBalance).toInt()}. Please clear your dues on Open Khata."
                     val encodedMessage = Uri.encode(message)
                     val whatsappIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://api.whatsapp.com/send?phone=${party.phone}&text=$encodedMessage"))
                     context.startActivity(whatsappIntent)

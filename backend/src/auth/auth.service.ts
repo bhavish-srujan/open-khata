@@ -176,7 +176,7 @@ export class AuthService {
     // allowed to use it — see SmsService's class comment.
     const success = await this.smsService.sendOtpSms(
       phoneNumber,
-      `Your Khatabook login code is ${generatedOtp}. It is valid for 10 minutes.`,
+      `Your Open Khata login code is ${generatedOtp}. It is valid for 10 minutes.`,
     );
 
     if (!success) {

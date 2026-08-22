@@ -1,3 +1,7 @@
 <resources>
-    <string name="app_name">Khatabook</string>
+    <!-- Display name only. The applicationId (com.example.khatabook) is the
+         app's identity and is deliberately NOT renamed: changing it would make
+         Android treat this as a different app, so existing installs could not
+         update to it and their local database would be orphaned. -->
+    <string name="app_name">Open Khata</string>
 </resources>

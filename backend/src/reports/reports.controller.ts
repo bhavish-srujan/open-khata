@@ -93,7 +93,7 @@ export class ReportsController {
     const business = await this.businessRepository.findOne({
       where: { id: businessId },
     });
-    const businessName = business?.name?.trim() || 'Khata Book Business';
+    const businessName = business?.name?.trim() || 'Open Khata Business';
 
     const pdfBuffer = await this.pdfService.generateBusinessStatement(
       businessName,

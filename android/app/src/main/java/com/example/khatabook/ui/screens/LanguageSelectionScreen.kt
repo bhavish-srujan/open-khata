@@ -57,7 +57,7 @@ fun LanguageSelectionScreen(
                                 Icon(Icons.Default.Language, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = "Khatabook",
+                                    text = "Open Khata",
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 18.sp,
                                     color = Color.White

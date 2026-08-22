@@ -817,7 +817,7 @@ class MainActivity : AppCompatActivity() {
                                         },
                                         onViewProfileClick = { navigateTo(AppScreen.CUSTOMER_PROFILE) },
                                         onSendBulkReminders = {
-                                            val message = "Dear ${updatedParty.name}, your total outstanding balance is ₹ ${kotlin.math.abs(updatedParty.currentBalance).toInt()}. Please clear your dues on Khatabook."
+                                            val message = "Dear ${updatedParty.name}, your total outstanding balance is ₹ ${kotlin.math.abs(updatedParty.currentBalance).toInt()}. Please clear your dues on Open Khata."
                                             SmsSender.send(context, updatedParty.phone, message, updatedParty.businessId)
                                         },
                                         canManageLedgerEntries = canManageLedgerEntries

@@ -305,7 +305,7 @@ fun SettingsScreen(
                 title = { Text(if (showChangePasswordDialog) "Change 4-Digit Security PIN" else "Set 4-Digit App Lock PIN", fontWeight = FontWeight.Bold) },
                 text = {
                     Column {
-                        Text("Enter a 4-digit security PIN to lock your Khatabook app", fontSize = 12.sp, color = KhatabookTextMuted)
+                        Text("Enter a 4-digit security PIN to lock your Open Khata app", fontSize = 12.sp, color = KhatabookTextMuted)
                         Spacer(modifier = Modifier.height(10.dp))
 
                         OutlinedTextField(

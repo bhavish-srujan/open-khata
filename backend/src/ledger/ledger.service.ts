@@ -252,7 +252,7 @@ export class LedgerService {
           const actionText =
             dto.type === 'GAVE' ? 'gave you' : 'received from you';
           const message =
-            `Khata Book: ${businessName} ${actionText} Rs ${dto.amount.toFixed(2)}. ` +
+            `Open Khata: ${businessName} ${actionText} Rs ${dto.amount.toFixed(2)}. ` +
             `${describeBalance(party.type, newBalance)}`;
 
           // Fire and forget (don't block the transaction). Transactional

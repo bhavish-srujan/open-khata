@@ -46,7 +46,7 @@ fun BackupInfoScreen(
                 .padding(20.dp)
         ) {
             Text(
-                text = "Your data is automatically backed-up when your phone is connected to the internet. In case you format this phone or mistakenly delete the app, just download the app again and login using your Khatabook-registered number. Your data will be automatically restored.",
+                text = "Your data is automatically backed-up when your phone is connected to the internet. In case you format this phone or mistakenly delete the app, just download the app again and login using your Open Khata-registered number. Your data will be automatically restored.",
                 fontSize = 14.sp,
                 color = KhatabookTextMuted,
                 lineHeight = 20.sp

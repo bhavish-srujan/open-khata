@@ -77,7 +77,7 @@ fun AboutUsScreen(
             Spacer(modifier = Modifier.height(16.dp))
 
             Text(
-                text = "Khatabook",
+                text = "Open Khata",
                 fontSize = 24.sp,
                 fontWeight = FontWeight.Bold,
                 color = KhatabookTextDark
@@ -92,7 +92,7 @@ fun AboutUsScreen(
             Spacer(modifier = Modifier.height(32.dp))
 
             Text(
-                text = "Khatabook is India's #1 digital ledger app for businesses to record their everyday transactions, manage customers, and grow their business digitally.",
+                text = "Open Khata is India's #1 digital ledger app for businesses to record their everyday transactions, manage customers, and grow their business digitally.",
                 fontSize = 14.sp,
                 color = KhatabookTextMuted,
                 textAlign = TextAlign.Center,

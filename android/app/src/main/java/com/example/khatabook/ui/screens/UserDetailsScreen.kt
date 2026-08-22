@@ -112,7 +112,7 @@ fun UserDetailsScreen(
             Spacer(modifier = Modifier.height(16.dp))
 
             Text(
-                text = "Welcome to Khatabook!",
+                text = "Welcome to Open Khata!",
                 fontSize = 20.sp,
                 fontWeight = FontWeight.Bold,
                 color = KhatabookTextDark

@@ -158,7 +158,7 @@ fun SmsSettingsScreen(
                     SenderModeTab(
                         selected = senderMode == SmsSenderMode.KHATABOOK_SMS,
                         icon = Icons.Default.MarkEmailRead,
-                        label = "Khatabook SMS",
+                        label = "Open Khata SMS",
                         selectedColor = Color(0xFF991B1B),
                         modifier = Modifier.weight(1f),
                         onClick = { senderMode = SmsSenderMode.KHATABOOK_SMS }
@@ -271,7 +271,7 @@ fun SmsSettingsScreen(
                         Icon(Icons.Default.Message, contentDescription = null, tint = KhatabookHeaderBlue, modifier = Modifier.size(20.dp))
                         Spacer(modifier = Modifier.width(10.dp))
                         Text(
-                            "You can use Khatabook Coins to send SMS after the monthly limit is crossed",
+                            "You can use Open Khata Coins to send SMS after the monthly limit is crossed",
                             fontSize = 12.sp,
                             color = KhatabookTextMuted
                         )
@@ -298,9 +298,9 @@ fun SmsSettingsScreen(
 
                     SettingsDivider()
 
-                    Text("Trade-offs of Khatabook SMS", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = KhatabookTextDark)
+                    Text("Trade-offs of Open Khata SMS", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = KhatabookTextDark)
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        BulletPointRow("SMS received from a Khatabook number", Color(0xFFB91C1C))
+                        BulletPointRow("SMS received from a Open Khata number", Color(0xFFB91C1C))
                         BulletPointRow("Limited details on the basic SMS", Color(0xFFB91C1C))
                         BulletPointRow("Can be marked as Spam or Promotional", Color(0xFFB91C1C))
                     }

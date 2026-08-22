@@ -185,7 +185,7 @@ fun PermissionsScreen(
             Spacer(modifier = Modifier.height(8.dp))
 
             Text(
-                text = "Khatabook needs a few permissions to unlock\nthe full experience for your business.",
+                text = "Open Khata needs a few permissions to unlock\nthe full experience for your business.",
                 fontSize = 14.sp,
                 color = KhatabookTextMuted,
                 textAlign = TextAlign.Center,
