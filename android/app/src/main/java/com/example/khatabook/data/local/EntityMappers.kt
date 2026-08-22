@@ -137,6 +137,7 @@ fun LedgerEntry.toEntity(ownerPhone: String, businessId: String): LedgerEntryEnt
     imageUrl = imageUrl,
     rawExtractedText = rawExtractedText,
     createdAt = createdAt,
+    transactionDate = transactionDate,
 )
 
 fun LedgerEntryEntity.toDomain(): LedgerEntry = LedgerEntry(
@@ -152,6 +153,10 @@ fun LedgerEntryEntity.toDomain(): LedgerEntry = LedgerEntry(
     imageUrl = imageUrl,
     rawExtractedText = rawExtractedText,
     createdAt = createdAt,
+    // Rows written before this column existed were backfilled from
+    // createdAt by MIGRATION_2_3; the 0 guard covers any row that somehow
+    // predates that so it never reports as 1 Jan 1970.
+    transactionDate = if (transactionDate > 0L) transactionDate else createdAt,
 )
 
 /**
@@ -179,6 +184,12 @@ fun LedgerFeedEntry.toEntity(ownerPhone: String, businessId: String): LedgerEntr
     imageUrl = null,
     rawExtractedText = null,
     createdAt = com.example.khatabook.utils.IsoTime.parseOrDefault(createdAt, System.currentTimeMillis()),
+    // Falls back to the creation instant when the server has no business date
+    // for this row (entries written before the field existed).
+    transactionDate = com.example.khatabook.utils.IsoTime.parseOrDefault(
+        transactionDate,
+        com.example.khatabook.utils.IsoTime.parseOrDefault(createdAt, System.currentTimeMillis())
+    ),
 )
 
 fun LedgerFeedRow.toDomain(): LedgerFeedEntry = LedgerFeedEntry(

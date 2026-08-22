@@ -14,7 +14,6 @@ import com.example.khatabook.data.local.KhatabookDatabase
 import com.example.khatabook.data.local.entity.BillEntity
 import com.example.khatabook.data.local.entity.BusinessEntity
 import com.example.khatabook.data.local.entity.ItemEntity
-import com.example.khatabook.data.local.entity.LedgerEntryEntity
 import com.example.khatabook.data.local.entity.PendingOpEntity
 import com.example.khatabook.data.local.entity.StaffMemberEntity
 import com.example.khatabook.data.local.entity.SyncStateEntity
@@ -67,11 +66,44 @@ private interface LegacyPartyDaoV1 {
     fun insert(party: LegacyPartyEntityV1)
 }
 
+/**
+ * `ledger_entries` as it stood at v1 — before `transactionDate`.
+ *
+ * This test previously reused the production entity here, which was accurate
+ * when the ledger table had not changed since v1. It has now: reusing the
+ * current entity would build a fixture that already contains the v3 column,
+ * and MIGRATION_2_3 would fail trying to add it twice — a fixture artefact,
+ * not a real upgrade path.
+ */
+@Entity(
+    tableName = "ledger_entries",
+    indices = [
+        Index(value = ["ownerPhone", "businessId", "partyId"]),
+        Index(value = ["ownerPhone", "businessId", "createdAt"]),
+        Index(value = ["partyId"]),
+    ],
+)
+private data class LegacyLedgerEntryV1(
+    @PrimaryKey val id: String,
+    val ownerPhone: String,
+    val businessId: String,
+    val partyId: String,
+    val amount: Double,
+    val type: String,
+    val note: String,
+    val paymentMethod: String,
+    val source: String,
+    val status: String,
+    val imageUrl: String?,
+    val rawExtractedText: String?,
+    val createdAt: Long,
+)
+
 @Database(
     entities = [
         BusinessEntity::class,
         LegacyPartyEntityV1::class,
-        LedgerEntryEntity::class,
+        LegacyLedgerEntryV1::class,
         ItemEntity::class,
         StaffMemberEntity::class,
         BillEntity::class,
@@ -138,7 +170,10 @@ class PartyInterestMigrationTest {
         // 2. The real app database class opens that same file and must migrate it.
         val migratedDb = Room.databaseBuilder(context, KhatabookDatabase::class.java, dbName)
             .allowMainThreadQueries()
-            .addMigrations(KhatabookDatabase.MIGRATION_1_2)
+            // The full chain: a device still on v1 upgrades through every
+            // intermediate version in one launch, so this exercises 1→2→3
+            // rather than 1→2 in isolation.
+            .addMigrations(KhatabookDatabase.MIGRATION_1_2, KhatabookDatabase.MIGRATION_2_3)
             .build()
 
         val survivors = migratedDb.partyDao().getForBusinessSync("+919876543210", "biz-1")

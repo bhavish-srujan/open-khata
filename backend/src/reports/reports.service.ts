@@ -15,16 +15,24 @@ export class ReportsService {
     // Assuming Party repository is needed for party details
   ) {}
 
+  /**
+   * Reporting windows are business dates, not record-creation timestamps.
+   *
+   * These filtered on createdAt, so entering yesterday's sale today put it in
+   * today's collection — the entry moved days purely because of when it was
+   * typed. transactionDate is what the user says happened; it is backfilled
+   * from created_at for older rows, so historical figures are unchanged.
+   */
   async getLedgerEntries(businessId: string, partyId?: string, startDate?: Date, endDate?: Date): Promise<LedgerEntry[]> {
     const where: any = { businessId };
     if (partyId) where.partyId = partyId;
     if (startDate && endDate) {
-      where.createdAt = Between(startDate, endDate);
+      where.transactionDate = Between(startDate, endDate);
     }
-    
+
     return this.ledgerRepository.find({
       where,
-      order: { createdAt: 'ASC' },
+      order: { transactionDate: 'ASC' },
       relations: { party: true }
     });
   }
@@ -33,7 +41,7 @@ export class ReportsService {
     const entries = await this.ledgerRepository.find({
       where: {
         businessId,
-        createdAt: Between(startDate, endDate)
+        transactionDate: Between(startDate, endDate)
       }
     });
 

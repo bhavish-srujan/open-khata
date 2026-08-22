@@ -13,6 +13,54 @@ import { ApiError, GoogleGenAI } from '@google/genai';
  *  only ever applies once, at startup, before any request is ever made. */
 const DEFAULT_MODEL = 'gemini-flash-lite-latest';
 
+/**
+ * True only for a real calendar date in YYYY-MM-DD form.
+ *
+ * `new Date(...)` alone is not enough: it accepts "2026-02-31" and silently
+ * rolls it into March. Re-serialising and comparing catches that, which
+ * matters here because the input is model output — the shape is suggested by
+ * the prompt, never guaranteed by it.
+ */
+export function isRealIsoDate(value: unknown): value is string {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return false;
+  }
+  const parsed = new Date(`${value}T00:00:00Z`);
+  return (
+    !Number.isNaN(parsed.getTime()) &&
+    parsed.toISOString().slice(0, 10) === value
+  );
+}
+
+/**
+ * Strips dates the model invented or mangled before they leave this service.
+ *
+ * A bad date is dropped rather than corrected: the client already defaults to
+ * today when no date is present, and quietly "fixing" 2026-99-99 into some
+ * nearby date would hand the user a confident-looking value nobody read off
+ * the sheet. Amounts and names are left exactly as extracted — this function
+ * is deliberately only about dates.
+ */
+export function sanitizeExtraction(raw: any): any {
+  if (!raw || typeof raw !== 'object') return raw;
+
+  const result: any = { ...raw };
+  if (!isRealIsoDate(result.date)) result.date = '';
+
+  if (Array.isArray(result.records)) {
+    result.records = result.records.map((record: any) => {
+      if (!record || typeof record !== 'object') return record;
+      if ('transactionDate' in record && !isRealIsoDate(record.transactionDate)) {
+        const { transactionDate, ...rest } = record;
+        return rest;
+      }
+      return record;
+    });
+  }
+
+  return result;
+}
+
 @Injectable()
 export class ScanningService {
   private readonly logger = new Logger(ScanningService.name);
@@ -58,7 +106,7 @@ export class ScanningService {
     if (!this.ai) {
       // Return mock data if API key is not configured
       return {
-        date: '2023-10-25',
+        date: '',
         totalCollected: 700.0,
         records: [
           { customerName: 'Rahul Traders', amount: 500.0 },
@@ -78,10 +126,17 @@ export class ScanningService {
         "date": "YYYY-MM-DD",
         "totalCollected": 5000.0,
         "records": [
-          { "customerName": "Name of customer", "amount": 500.0 }
+          { "customerName": "Name of customer", "amount": 500.0, "transactionDate": "YYYY-MM-DD" }
         ]
       }
-      If the exact date is not visible, use today's date or leave it blank.
+      "date" is the single date written on the sheet that applies to every row.
+      Leave "date" as an empty string if no date is visible anywhere. Do NOT
+      guess a date and do NOT substitute today's date — the app supplies its
+      own default, and an invented date is worse than none because the user
+      cannot tell it apart from one you actually read.
+      Only include "transactionDate" on a record when THAT row carries its own
+      date different from the sheet date; otherwise omit the field entirely.
+      Never output a date that is not a real calendar date.
       Do not include any markdown formatting or text outside the JSON object.
       `;
 
@@ -122,7 +177,7 @@ export class ScanningService {
       }
 
       try {
-        return JSON.parse(text);
+        return sanitizeExtraction(JSON.parse(text));
       } catch (parseError) {
         // Gemini answered, but not with the strict JSON the prompt demands
         // (seen in practice: markdown code fences, or truncated output on a

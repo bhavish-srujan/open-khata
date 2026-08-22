@@ -39,6 +39,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material.icons.filled.CalendarToday
+import com.example.khatabook.utils.SheetDates
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Description
@@ -82,7 +85,15 @@ fun SmartAiSheetScannerDialog(
 ) {
     var currentStep by remember { mutableStateOf(1) }
     var selectedSource by remember { mutableStateOf("Sample Sheet (21/01/24)") }
-    var sheetDate by remember { mutableStateOf("21/01/2024") }
+    // Today until a scan says otherwise. Previously a hardcoded sample date,
+    // which would have been applied verbatim to real collections.
+    var sheetDate by remember { mutableStateOf(SheetDates.format(SheetDates.today())) }
+    var sheetDateError by remember { mutableStateOf<String?>(null) }
+    var showSheetDatePicker by remember { mutableStateOf(false) }
+    // Whether the date shown was actually read off the sheet, so the UI can
+    // say "extracted" versus "defaulted to today" rather than implying the
+    // model found a date it never saw.
+    var sheetDateWasExtracted by remember { mutableStateOf(false) }
     var editingRecordId by remember { mutableStateOf<String?>(null) }
     var editAmountText by remember { mutableStateOf("") }
     var editNameText by remember { mutableStateOf("") }
@@ -90,6 +101,50 @@ fun SmartAiSheetScannerDialog(
     var uploadError by remember { mutableStateOf<String?>(null) }
     
     val extractedRecords = remember { mutableStateListOf<LedgerSheetRecord>() }
+
+    if (showSheetDatePicker) {
+        val pickerState = rememberDatePickerState(
+            initialSelectedDateMillis = SheetDates.parseOrNull(sheetDate) ?: SheetDates.today()
+        )
+        DatePickerDialog(
+            onDismissRequest = { showSheetDatePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    pickerState.selectedDateMillis?.let {
+                        sheetDate = SheetDates.format(it)
+                        sheetDateError = null
+                    }
+                    showSheetDatePicker = false
+                }) { Text("OK") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSheetDatePicker = false }) { Text("CANCEL") }
+            }
+        ) {
+            DatePicker(state = pickerState)
+        }
+    }
+
+    /**
+     * Validates the sheet date, then hands the records over.
+     *
+     * Returns false (and shows the error) rather than silently substituting a
+     * date: these rows become real money in real ledgers, so a date the user
+     * cannot see is worse than refusing to proceed.
+     */
+    fun acceptRecords(active: List<LedgerSheetRecord>): Boolean {
+        val parsed = SheetDates.parseOrNull(sheetDate)
+        if (parsed == null) {
+            sheetDateError = "Enter a valid date (${SheetDates.DISPLAY_PATTERN.lowercase()})"
+            return false
+        }
+        if (!SheetDates.isNotInFuture(parsed)) {
+            sheetDateError = "Date cannot be in the future"
+            return false
+        }
+        onBulkLedgerUpdate(active, SheetDates.format(parsed))
+        return true
+    }
     val coroutineScope = rememberCoroutineScope()
     var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
 
@@ -105,7 +160,14 @@ fun SmartAiSheetScannerDialog(
                 if (response.isSuccessful) {
                     val data = response.body()
                     if (data != null) {
-                        sheetDate = data.date.takeIf { it.isNotBlank() } ?: "Unknown Date"
+                        // The backend already drops dates that aren't real
+                        // calendar dates, so anything arriving here is either
+                        // genuine or empty. Re-parsing locally keeps this
+                        // correct even against an older backend.
+                        val extractedSheetDate = SheetDates.parseOrNull(data.date)
+                        sheetDateWasExtracted = extractedSheetDate != null
+                        sheetDate = SheetDates.format(extractedSheetDate ?: SheetDates.today())
+                        sheetDateError = null
                         extractedRecords.clear()
                         
                         data.records.forEach { extracted ->
@@ -119,10 +181,16 @@ fun SmartAiSheetScannerDialog(
                             
                             val finalName = matchedParty?.name ?: extracted.customerName
                             
+                            // A row keeps its own date only when the sheet
+                            // actually carried a different one for that row;
+                            // otherwise it follows the sheet date, including
+                            // any edit the user makes before accepting.
+                            val rowDate = SheetDates.parseOrNull(extracted.transactionDate)
+
                             extractedRecords.add(
                                 LedgerSheetRecord(
                                     id = UUID.randomUUID().toString(),
-                                    date = data.date,
+                                    date = rowDate?.let { SheetDates.format(it) } ?: "",
                                     customerCodeOrName = finalName,
                                     amountCollected = extracted.amount,
                                     isSelected = true,
@@ -328,9 +396,42 @@ fun SmartAiSheetScannerDialog(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Column {
-                                Text("Extracted Sheet Date:", fontSize = 11.sp, color = KhatabookTextMuted)
-                                Text(sheetDate, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = KhatabookHeaderBlue)
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    if (sheetDateWasExtracted) "Sheet Date (extracted):" else "Sheet Date (not on sheet):",
+                                    fontSize = 11.sp,
+                                    color = KhatabookTextMuted
+                                )
+                                // Editable before accepting — the model can
+                                // misread a handwritten date, and this is the
+                                // last point at which that is cheap to fix.
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    BasicTextField(
+                                        value = sheetDate,
+                                        onValueChange = { sheetDate = it; sheetDateError = null },
+                                        singleLine = true,
+                                        textStyle = androidx.compose.ui.text.TextStyle(
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (sheetDateError != null) KhatabookGiveRed else KhatabookHeaderBlue
+                                        ),
+                                        modifier = Modifier.width(96.dp)
+                                    )
+                                    BounceIconButton(
+                                        onClick = { showSheetDatePicker = true },
+                                        modifier = Modifier.size(28.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.CalendarToday,
+                                            contentDescription = "Pick sheet date",
+                                            tint = KhatabookHeaderBlue,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
+                                if (sheetDateError != null) {
+                                    Text(sheetDateError!!, fontSize = 10.sp, color = KhatabookGiveRed)
+                                }
                             }
 
                             Column(horizontalAlignment = Alignment.End) {
@@ -501,8 +602,7 @@ fun SmartAiSheetScannerDialog(
                             if (newCustomers.isNotEmpty()) {
                                 currentStep = 4
                             } else {
-                                onBulkLedgerUpdate(active, sheetDate)
-                                onDismiss()
+                                if (acceptRecords(active)) onDismiss()
                             }
                         },
                         shape = RoundedCornerShape(10.dp),
@@ -516,8 +616,7 @@ fun SmartAiSheetScannerDialog(
                                 if (newCustomers.isNotEmpty()) {
                                     currentStep = 4
                                 } else {
-                                    onBulkLedgerUpdate(active, sheetDate)
-                                    onDismiss()
+                                    if (acceptRecords(active)) onDismiss()
                                 }
                             }
                     ) {
@@ -609,8 +708,7 @@ fun SmartAiSheetScannerDialog(
                     BounceButton(
                         onClick = {
                             val active = extractedRecords.filter { it.isSelected }
-                            onBulkLedgerUpdate(active, sheetDate)
-                            onDismiss()
+                            if (acceptRecords(active)) onDismiss()
                         },
                         shape = RoundedCornerShape(10.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = KhatabookGotGreen),

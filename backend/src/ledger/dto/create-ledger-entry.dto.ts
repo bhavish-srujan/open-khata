@@ -1,6 +1,7 @@
 import {
   IsBoolean,
   IsIn,
+  IsISO8601,
   IsNumber,
   IsOptional,
   IsPositive,
@@ -63,4 +64,19 @@ export class CreateLedgerEntryDto {
   @IsOptional()
   @IsBoolean()
   notifyCustomer?: boolean;
+
+  /**
+   * When the transaction actually happened, ISO-8601.
+   *
+   * Optional: omitted by every existing app build, and by any create that is
+   * simply "now" — the service defaults to the current time, which is exactly
+   * what those clients already relied on.
+   *
+   * Validated server-side rather than trusting the client, because two of the
+   * callers are untrusted: a hand-typed date and an AI-extracted one. @IsISO8601
+   * rejects impossible calendar dates like 2026-99-99 outright.
+   */
+  @IsOptional()
+  @IsISO8601({ strict: true })
+  transactionDate?: string;
 }

@@ -31,5 +31,23 @@ data class LedgerEntry(
     val status: EntryStatus = EntryStatus.CONFIRMED,
     val imageUrl: String? = null,
     val rawExtractedText: String? = null,
-    val createdAt: Long = System.currentTimeMillis()
+    /**
+     * When this entry was *recorded by the app*. Never user-editable — it is
+     * the audit trail for when the row came into existence, including for
+     * offline writes that sync days later.
+     */
+    val createdAt: Long = System.currentTimeMillis(),
+    /**
+     * When the transaction actually *happened*, as stated by the user.
+     *
+     * Deliberately separate from [createdAt]: entering yesterday's sale today
+     * must land in yesterday's daily collection while still recording that the
+     * row was created today. Every business-date question — daily/weekly/
+     * monthly collections, statements, grouping — reads this field;
+     * [createdAt] answers "when did we learn about it".
+     *
+     * Defaults to the creation instant, so an entry nobody backdates behaves
+     * exactly as before this field existed.
+     */
+    val transactionDate: Long = createdAt
 )

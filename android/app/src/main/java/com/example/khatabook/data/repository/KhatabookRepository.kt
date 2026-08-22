@@ -984,6 +984,16 @@ class KhatabookRepository(
                         createdAt = com.example.khatabook.utils.IsoTime.parseOrDefault(
                             r.createdAt,
                             System.currentTimeMillis()
+                        ),
+                        // Business date as the server holds it. Falls back to
+                        // the creation instant for rows written before the
+                        // field existed, matching the backend's own backfill.
+                        transactionDate = com.example.khatabook.utils.IsoTime.parseOrDefault(
+                            r.transactionDate,
+                            com.example.khatabook.utils.IsoTime.parseOrDefault(
+                                r.createdAt,
+                                System.currentTimeMillis()
+                            )
                         )
                     )
                 }
@@ -1701,13 +1711,18 @@ class KhatabookRepository(
             }
         }
 
-        // 2. Add GOT entry (money collected) and update running balance
+        // 2. Add GOT entry (money collected) and update running balance.
+        // The sheet's own date becomes the entry's business date, so a sheet
+        // scanned days later still lands in the collection it belongs to. An
+        // unparseable or absent date falls back to now rather than being
+        // rejected — a scan must not be lost over a smudged date.
         addLedgerEntry(
             partyId = existingParty.id,
             amount = amountCollected,
             type = TransactionType.GOT,
             note = "Scan Khata Collection: $date",
-            source = EntrySource.OCR
+            source = EntrySource.OCR,
+            transactionDate = com.example.khatabook.utils.SheetDates.parseOrNull(date)
         )
     }
 
@@ -1717,7 +1732,13 @@ class KhatabookRepository(
         type: TransactionType,
         note: String = "",
         paymentMethod: String = "Cash",
-        source: EntrySource = EntrySource.MANUAL
+        source: EntrySource = EntrySource.MANUAL,
+        /**
+         * The business date the user chose. Null means "now" — which keeps an
+         * ordinary, non-backdated entry behaving exactly as it did before this
+         * parameter existed, including the bytes it puts on the wire.
+         */
+        transactionDate: Long? = null
     ): LedgerEntry? {
         if (amount <= 0) return null
 
@@ -1740,7 +1761,10 @@ class KhatabookRepository(
             note = note,
             paymentMethod = paymentMethod,
             source = source,
-            status = EntryStatus.CONFIRMED
+            status = EntryStatus.CONFIRMED,
+            // createdAt stays the real creation instant (the model's own
+            // default) — only the business date follows the user's choice.
+            transactionDate = transactionDate ?: System.currentTimeMillis()
         )
 
         // Atomic running balance recalculation
@@ -1818,6 +1842,15 @@ class KhatabookRepository(
                         note = note,
                         paymentMethod = paymentMethod,
                         source = source.name,
+                        // Sent only when the user actually backdated the entry,
+                        // so an ordinary create is byte-identical to what older
+                        // builds sent. The value the user picked travels all the
+                        // way to Postgres and is never re-derived at sync time —
+                        // deriving it again would stamp the delivery date onto a
+                        // transaction that happened days earlier.
+                        transactionDate = transactionDate?.let {
+                            com.example.khatabook.utils.IsoTime.format(it)
+                        },
                         // The server sends the transaction message when the
                         // queued create is delivered — this is what actually
                         // gates that send. Previously omitted entirely, which

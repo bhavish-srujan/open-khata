@@ -57,7 +57,7 @@ import com.example.khatabook.data.local.entity.SyncStateEntity
         PendingOpEntity::class,
         SyncStateEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = false,
 )
 abstract class KhatabookDatabase : RoomDatabase() {
@@ -95,6 +95,23 @@ abstract class KhatabookDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * Adds the user-controlled business date to ledger entries.
+         *
+         * Existing rows are backfilled from `createdAt` rather than left at 0
+         * or stamped with "now": every historical entry must keep belonging to
+         * the day it already appeared under, or upgrading the app would
+         * silently rewrite past daily/weekly/monthly collections. Backfilling
+         * from createdAt reproduces exactly the behaviour those rows had when
+         * createdAt was the only date there was.
+         */
+        internal val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE ledger_entries ADD COLUMN transactionDate INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("UPDATE ledger_entries SET transactionDate = createdAt")
+            }
+        }
+
         fun getInstance(context: Context): KhatabookDatabase =
             instance ?: synchronized(this) {
                 instance ?: build(context).also { instance = it }
@@ -107,7 +124,7 @@ abstract class KhatabookDatabase : RoomDatabase() {
                 "khatabook.db",
             )
                 .allowMainThreadQueries()
-                .addMigrations(MIGRATION_1_2)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                 .build()
     }
 }

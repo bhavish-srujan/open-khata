@@ -762,7 +762,10 @@ class MainActivity : AppCompatActivity() {
                                                 repository.addOrUpdateSheetRecord(
                                                     customerCodeOrName = rec.customerCodeOrName,
                                                     amountCollected = rec.amountCollected,
-                                                    date = date,
+                                                    // A row that carried its own date on the sheet
+                                                    // keeps it; everything else follows the sheet
+                                                    // date the user confirmed.
+                                                    date = rec.date.ifBlank { date },
                                                     businessId = selectedBusinessId,
                                                     isNewCustomer = rec.isNewCustomer,
                                                     newPhone = rec.newPhone,
@@ -797,8 +800,11 @@ class MainActivity : AppCompatActivity() {
                                         party = updatedParty,
                                         entries = entries,
                                         onBackClick = { navigateBack() },
-                                        onAddEntry = { partyId, amount, type, note ->
-                                            repository.addLedgerEntry(partyId, amount, type, note)
+                                        onAddEntry = { partyId, amount, type, note, transactionDate ->
+                                            repository.addLedgerEntry(
+                                                partyId, amount, type, note,
+                                                transactionDate = transactionDate
+                                            )
                                         },
                                         onDeleteParty = { partyId ->
                                             repository.deleteParty(partyId)

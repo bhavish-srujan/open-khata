@@ -7,6 +7,7 @@ import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.ui.platform.LocalContext
 import com.example.khatabook.utils.isDialable
+import com.example.khatabook.utils.SheetDates
 import com.example.khatabook.utils.PdfGenerator
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -20,6 +21,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
@@ -55,7 +57,7 @@ fun CustomerLedgerScreen(
     party: Party,
     entries: List<LedgerEntry>,
     onBackClick: () -> Unit,
-    onAddEntry: (partyId: String, amount: Double, type: TransactionType, note: String) -> Unit,
+    onAddEntry: (partyId: String, amount: Double, type: TransactionType, note: String, transactionDate: Long) -> Unit,
     onDeleteParty: (partyId: String) -> Unit = {},
     onEditEntry: (entryId: String, newAmount: Double, newNote: String) -> Unit = { _, _, _ -> },
     onDeleteEntry: (entryId: String) -> Unit = {},
@@ -382,6 +384,35 @@ fun CustomerLedgerScreen(
         var amountText by remember { mutableStateOf("") }
         var noteText by remember { mutableStateOf("") }
         var amountError by remember { mutableStateOf<String?>(null) }
+        // Defaults to today, so the common case needs no interaction at all.
+        // Held as text because the field is directly typeable as well as
+        // picker-driven; it is parsed (and rejected) on save.
+        var dateText by remember { mutableStateOf(SheetDates.format(SheetDates.today())) }
+        var dateError by remember { mutableStateOf<String?>(null) }
+        var showDatePicker by remember { mutableStateOf(false) }
+
+        if (showDatePicker) {
+            val pickerState = rememberDatePickerState(
+                initialSelectedDateMillis = SheetDates.parseOrNull(dateText) ?: SheetDates.today()
+            )
+            DatePickerDialog(
+                onDismissRequest = { showDatePicker = false },
+                confirmButton = {
+                    TextButton(onClick = {
+                        pickerState.selectedDateMillis?.let {
+                            dateText = SheetDates.format(it)
+                            dateError = null
+                        }
+                        showDatePicker = false
+                    }) { Text("OK") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showDatePicker = false }) { Text("CANCEL") }
+                }
+            ) {
+                DatePicker(state = pickerState)
+            }
+        }
 
         AlertDialog(
             onDismissRequest = { showAddEntryDialog = false },
@@ -418,17 +449,47 @@ fun CustomerLedgerScreen(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(8.dp)
                     )
-}
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Typeable *and* pickable: entering a backdated run of
+                    // transactions is faster by keyboard, while the picker
+                    // avoids format guesswork for a one-off.
+                    OutlinedTextField(
+                        value = dateText,
+                        onValueChange = { dateText = it; dateError = null },
+                        label = { Text("Date") },
+                        singleLine = true,
+                        isError = dateError != null,
+                        placeholder = { Text(SheetDates.DISPLAY_PATTERN.lowercase(), fontSize = 12.sp) },
+                        trailingIcon = {
+                            BounceIconButton(onClick = { showDatePicker = true }) {
+                                Icon(Icons.Default.CalendarToday, contentDescription = "Pick date", tint = KhatabookHeaderBlue)
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(8.dp)
+                    )
+                    if (dateError != null) {
+                        Text(dateError!!, color = KhatabookGiveRed, fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp))
+                    }
+                }
             },
             confirmButton = {
                 BounceButton(
                     onClick = {
                         val amount = amountText.toDoubleOrNull()
+                        // Rejected, never coerced: silently turning 31/02 into
+                        // 03/03 would file money under a day the user did not
+                        // choose.
+                        val parsedDate = SheetDates.parseOrNull(dateText)
                         when {
                             amount == null -> amountError = "Enter a valid amount"
                             amount <= 0 -> amountError = "Amount must be greater than zero"
+                            parsedDate == null -> dateError = "Enter a valid date (${SheetDates.DISPLAY_PATTERN.lowercase()})"
+                            !SheetDates.isNotInFuture(parsedDate) -> dateError = "Date cannot be in the future"
                             else -> {
-                                onAddEntry(party.id, amount, selectedEntryType, noteText)
+                                onAddEntry(party.id, amount, selectedEntryType, noteText, parsedDate)
                                 showAddEntryDialog = false
                             }
                         }

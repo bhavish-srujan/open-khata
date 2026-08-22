@@ -216,6 +216,13 @@ export class LedgerService {
           paymentMethod: dto.paymentMethod ?? 'Cash',
           source: dto.source ?? 'MANUAL',
           status: 'CONFIRMED',
+          // The user's business date, or now when the client did not send one
+          // (older builds, and any entry that simply happened today). createdAt
+          // is left to @CreateDateColumn so the audit timestamp stays honest
+          // even for a backdated row.
+          transactionDate: dto.transactionDate
+            ? new Date(dto.transactionDate)
+            : new Date(),
         });
         const savedEntry = await manager.save(entry);
 

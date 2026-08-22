@@ -1,5 +1,6 @@
 package com.example.khatabook.data.local.entity
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
@@ -44,4 +45,18 @@ data class LedgerEntryEntity(
     val imageUrl: String?,
     val rawExtractedText: String?,
     val createdAt: Long,
+    /**
+     * Business date — see [com.example.khatabook.data.model.LedgerEntry].
+     *
+     * Added by MIGRATION_2_3, which backfills existing rows from createdAt so
+     * no historical entry silently changes the day it belongs to.
+     *
+     * `defaultValue` is declared because SQLite requires a default when adding
+     * a NOT NULL column to a table that already has rows, and Room validates
+     * the live schema against this declaration on open. Without it, Room
+     * rejects the upgraded database with "Migration didn't properly handle"
+     * and the app crashes on first launch after updating.
+     */
+    @ColumnInfo(defaultValue = "0")
+    val transactionDate: Long = 0L,
 )

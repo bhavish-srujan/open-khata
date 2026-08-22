@@ -17,7 +17,13 @@ data class VerifyOtpResponse(val access_token: String, val is_new_user: Boolean)
 
 // ─── Scanning DTOs ──────────────────────────────────────────
 @Keep
-data class ExtractedEntry(val customerName: String, val amount: Double)
+data class ExtractedEntry(
+    val customerName: String,
+    val amount: Double,
+    /** Set only when this row carried its own date differing from the sheet
+     *  date. Null otherwise, so the row follows the sheet date. */
+    val transactionDate: String? = null
+)
 @Keep
 data class ExtractLedgerResponse(val date: String, val totalCollected: Double, val records: List<ExtractedEntry>)
 
@@ -89,7 +95,10 @@ data class LedgerEntryResponse(
     val note: String?,
     val paymentMethod: String,
     val source: String,
-    val createdAt: String
+    val createdAt: String,
+    /** Business date from the server. Null for rows created before the field
+     *  existed; callers fall back to createdAt. */
+    val transactionDate: String? = null
 )
 
 /** Editable fields on an existing entry. Type and party are not changeable. */
@@ -109,6 +118,10 @@ data class CreateLedgerEntryRequest(
     val note: String = "",
     val paymentMethod: String = "Cash",
     val source: String = "MANUAL",
+    /** ISO-8601 business date chosen by the user. Omitted (null) when the
+     *  entry is simply "now", keeping such a request byte-identical to what
+     *  older app builds sent. */
+    val transactionDate: String? = null,
     /** The "Send transaction SMS" toggle's value at creation time — the
      *  single source of truth LedgerService gates its own SMS send on. Null
      *  is never sent deliberately by this client; it exists only so an old
@@ -243,6 +256,8 @@ data class LedgerFeedEntry(
     val paymentMethod: String,
     val source: String,
     val createdAt: String,
+    /** Business date; null for rows predating the field — see toEntity. */
+    val transactionDate: String? = null,
     val party: PartyResponse? = null
 )
 
