@@ -134,7 +134,7 @@ export class AuthService {
       throw new BadRequestException('Phone number is required');
     }
 
-    // SmsService.sendSms() mocks a successful send when TextBee is unconfigured
+    // SmsService.sendOtpSms() mocks a successful send when TextBee is unconfigured
     // — the right behaviour for low-stakes senders like reminders, wrong here.
     // A caller must never be told a login code was sent when nothing left the
     // server: they would be stuck waiting on a code with no way to get one.
@@ -172,8 +172,9 @@ export class AuthService {
     user.otpAttempts = 0;
     await this.userRepository.save(user);
 
-    // Send OTP via SMS Service (TextBee)
-    const success = await this.smsService.sendSms(
+    // TextBee, via the OTP-only entry point. This is the one path that is
+    // allowed to use it — see SmsService's class comment.
+    const success = await this.smsService.sendOtpSms(
       phoneNumber,
       `Your Khatabook login code is ${generatedOtp}. It is valid for 10 minutes.`,
     );

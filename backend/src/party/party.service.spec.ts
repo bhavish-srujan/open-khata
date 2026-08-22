@@ -37,7 +37,7 @@ describe('PartyService — client-supplied ids', () => {
     const moduleRef: TestingModule = await Test.createTestingModule({
       providers: [
         PartyService,
-        { provide: SmsService, useValue: { sendSms } },
+        { provide: SmsService, useValue: { sendSms, sendOtpSms: sendSms, sendTransactionalSms: sendSms } },
         {
           provide: DataSource,
           // PartyService.delete removes dependents transactionally.
@@ -114,8 +114,10 @@ describe('PartyService — client-supplied ids', () => {
       name: 'Overwritten Name',
     });
 
-    // Create is create, not upsert — the stored row wins.
-    expect(replay.name).toBe('Rahul Traders');
+    // Create is create, not upsert — the stored row wins. Stored in the
+    // canonical uppercase form (see normalizePartyName), which is why this
+    // expects RAHUL TRADERS rather than the casing the DTO carried.
+    expect(replay.name).toBe('RAHUL TRADERS');
     expect(rows).toHaveLength(1);
   });
 

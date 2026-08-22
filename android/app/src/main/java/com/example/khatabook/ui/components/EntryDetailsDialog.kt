@@ -64,7 +64,7 @@ fun EntryDetailsDialog(
     // identical key when this entry's SMS was originally sent).
     val smsEnabled = remember(party.businessId) {
         context.getSharedPreferences("sms_settings", android.content.Context.MODE_PRIVATE)
-            .getBoolean("send_transaction_sms_${party.businessId}", true)
+            .getBoolean("send_transaction_sms_${party.businessId}", com.example.khatabook.data.repository.TRANSACTION_SMS_DEFAULT)
     }
 
     Surface(

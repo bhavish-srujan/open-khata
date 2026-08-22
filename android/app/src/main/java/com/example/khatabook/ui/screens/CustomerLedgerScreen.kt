@@ -6,6 +6,7 @@ import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.ui.platform.LocalContext
+import com.example.khatabook.utils.isDialable
 import com.example.khatabook.utils.PdfGenerator
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -120,7 +121,34 @@ fun CustomerLedgerScreen(
                             }
                         },
                         actions = {
-                            // Top actions removed to match screenshot
+                            // Only offered when there is a real number to dial.
+                            // Hidden rather than disabled: a permanently-dead
+                            // control invites tapping and explains nothing, and
+                            // the placeholder number some older Scan Khata
+                            // records carry is not dialable either.
+                            if (isDialable(party.phone)) {
+                                BounceIconButton(onClick = {
+                                    // ACTION_DIAL, not ACTION_CALL: it opens the
+                                    // dialer pre-filled and lets the user press
+                                    // call, so the app needs no CALL_PHONE
+                                    // permission.
+                                    val intent = android.content.Intent(
+                                        android.content.Intent.ACTION_DIAL,
+                                        android.net.Uri.parse("tel:${android.net.Uri.encode(party.phone.trim())}")
+                                    )
+                                    try {
+                                        context.startActivity(intent)
+                                    } catch (_: android.content.ActivityNotFoundException) {
+                                        // A device with no dialer at all (rare,
+                                        // but tablets exist) must not crash.
+                                        android.widget.Toast.makeText(
+                                            context, "No dialer app available", android.widget.Toast.LENGTH_SHORT
+                                        ).show()
+                                    }
+                                }) {
+                                    Icon(Icons.Default.Call, contentDescription = "Call ${party.name}", tint = Color.White)
+                                }
+                            }
                         },
                         colors = TopAppBarDefaults.topAppBarColors(containerColor = KhatabookHeaderBlue)
                     )

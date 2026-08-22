@@ -66,9 +66,12 @@ class KhatabookRepositoryTest {
     fun addParty_addsPartyToList() = runTest {
         val newParty = repository.addParty("Amit Traders", "+91 99999 88888", PartyType.CUSTOMER)
         val parties = repository.parties.first()
-        
+
         assertNotNull(newParty)
-        assertEquals("Amit Traders", parties.first().name)
+        // Stored in the canonical uppercase form. Party names are normalised on
+        // the way in so that "Amit Traders", "amit traders" and "AMIT TRADERS"
+        // are one customer rather than three — see PartyNames.
+        assertEquals("AMIT TRADERS", parties.first().name)
     }
 
     @Test

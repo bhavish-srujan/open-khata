@@ -26,17 +26,38 @@ export class CreatePartyDto {
   @IsUUID()
   id?: string;
 
+  /**
+   * @IsNotEmpty alone rejects only '' / null / undefined, so a whitespace-only
+   * name ("   ") passed validation. That was survivable while the value was
+   * stored verbatim, but PartyService now trims it as part of canonicalisation,
+   * which would turn it into a genuinely empty name in the database. Requiring
+   * one non-whitespace character keeps that from being reachable. Names with
+   * surrounding spaces are unaffected — they still validate and are trimmed.
+   */
   @IsString()
   @IsNotEmpty()
+  @Matches(/\S/, { message: 'name must not be blank' })
   @MaxLength(120)
   name: string;
 
+  /**
+   * Optional. A party is identified by name; a phone number is contact detail,
+   * not identity, and a shopkeeper frequently records a customer before ever
+   * having one.
+   *
+   * Blank is accepted and stored blank. It is never replaced with a
+   * placeholder: a fabricated number is indistinguishable from a real one to
+   * every downstream consumer (SMS, reminders, the dialer), so the absence has
+   * to survive as an absence. When a value *is* supplied it must still look
+   * like a phone number — relaxing "required" must not also relax "valid".
+   */
+  @IsOptional()
+  @ValidateIf((_dto, value) => value !== undefined && value !== null && value !== '')
   @IsString()
-  @IsNotEmpty()
   @Matches(/^[+0-9][0-9\s\-()]{5,19}$/, {
     message: 'phone must be a valid phone number',
   })
-  phone: string;
+  phone?: string;
 
   @IsIn(['CUSTOMER', 'SUPPLIER'])
   type: 'CUSTOMER' | 'SUPPLIER';

@@ -159,11 +159,11 @@ fun LedgerEntryEntity.toDomain(): LedgerEntry = LedgerEntry(
  * same [LedgerEntryEntity] table [LedgerEntry]/`getLedgerEntries` write to —
  * see [LedgerEntryEntity]'s class doc for why there is only one table.
  *
- * `createdAt` defaults to "now" rather than parsing the server's ISO
- * timestamp — matching the pre-existing behavior of the per-party sync path
- * (`syncLedgerEntriesFromServer`'s mapped [LedgerEntry] never set it from
- * the server either), preserved here rather than fixed, since this
- * migration's scope is the storage engine, not this pre-existing quirk.
+ * `createdAt` is parsed from the server's ISO timestamp. It previously
+ * defaulted to "now" (as did `syncLedgerEntriesFromServer`), which meant a
+ * device restoring after its local data was cleared re-dated every entry to
+ * the moment of the restore — collapsing months of history onto one day and
+ * making every daily/weekly/monthly figure derived from it wrong.
  */
 fun LedgerFeedEntry.toEntity(ownerPhone: String, businessId: String): LedgerEntryEntity = LedgerEntryEntity(
     id = id,
@@ -178,7 +178,7 @@ fun LedgerFeedEntry.toEntity(ownerPhone: String, businessId: String): LedgerEntr
     status = EntryStatus.CONFIRMED.name,
     imageUrl = null,
     rawExtractedText = null,
-    createdAt = System.currentTimeMillis(),
+    createdAt = com.example.khatabook.utils.IsoTime.parseOrDefault(createdAt, System.currentTimeMillis()),
 )
 
 fun LedgerFeedRow.toDomain(): LedgerFeedEntry = LedgerFeedEntry(
@@ -189,7 +189,11 @@ fun LedgerFeedRow.toDomain(): LedgerFeedEntry = LedgerFeedEntry(
     note = entry.note,
     paymentMethod = entry.paymentMethod,
     source = entry.source,
-    createdAt = entry.createdAt.toString(),
+    // ISO, not raw epoch millis: this value round-trips back through
+    // LedgerFeedEntry.toEntity, which now parses it as a timestamp. Emitting
+    // "1787143741497" here would fail that parse and silently re-date the
+    // entry to "now" — the exact bug this pair of mappers just fixed.
+    createdAt = com.example.khatabook.utils.IsoTime.format(entry.createdAt),
     party = if (partyName == null) null else PartyResponse(
         id = entry.partyId,
         name = partyName,

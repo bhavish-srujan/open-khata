@@ -17,6 +17,18 @@ import { SmsService } from '../notifications/sms/sms.service';
 /** Postgres unique_violation. */
 const POSTGRES_UNIQUE_VIOLATION = '23505';
 
+/**
+ * Canonical storage form for a party name: trimmed, internal whitespace
+ * collapsed, uppercased. Mirrors the Android client's PartyNames.normalize so
+ * both sides agree on what "the same customer" looks like.
+ *
+ * Applies to the party name only — notes, business names and transaction text
+ * are prose and are left exactly as written.
+ */
+export function normalizePartyName(raw: string): string {
+  return (raw ?? '').trim().replace(/\s+/g, ' ').toUpperCase();
+}
+
 @Injectable()
 export class PartyService {
   constructor(
@@ -60,8 +72,12 @@ export class PartyService {
 
     const party = this.partyRepository.create({
       id: dto.id,
-      name: dto.name,
-      phone: dto.phone,
+      // Canonical uppercase, matching the client. Applied server-side too so a
+      // party created by any other caller cannot reintroduce the casing
+      // duplicates this normalisation exists to prevent.
+      name: normalizePartyName(dto.name),
+      // Absent stays absent — never substituted with a placeholder number.
+      phone: dto.phone?.trim() ?? '',
       type: dto.type,
       gstin: dto.gstin,
       businessId,
@@ -95,7 +111,8 @@ export class PartyService {
       });
       const businessName = business?.name?.trim() || 'your shop';
 
-      await this.smsService.sendSms(
+      // Customer-facing welcome message — transactional channel, not TextBee.
+      await this.smsService.sendTransactionalSms(
         savedParty.phone,
         `Welcome to ${businessName}! Your Khata Book account has been created.`,
       );

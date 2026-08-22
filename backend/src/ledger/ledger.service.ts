@@ -248,8 +248,12 @@ export class LedgerService {
             `Khata Book: ${businessName} ${actionText} Rs ${dto.amount.toFixed(2)}. ` +
             `${describeBalance(party.type, newBalance)}`;
 
-          // Fire and forget (don't block the transaction)
-          this.smsService.sendSms(party.phone, message).catch(console.error);
+          // Fire and forget (don't block the transaction). Transactional
+          // channel, never TextBee — TextBee is reserved for OTP, and a
+          // customer notification must not consume the login allowance.
+          this.smsService
+            .sendTransactionalSms(party.phone, message)
+            .catch(console.error);
         }
 
         return savedEntry;

@@ -130,7 +130,7 @@ describe('POST /api/v1/reminders/send', () => {
         RemindersService,
         {
           provide: SmsService,
-          useValue: { sendSms, isConfigured: () => false },
+          useValue: { sendSms, sendOtpSms: sendSms, sendTransactionalSms: sendSms, isConfigured: () => false, isTransactionalConfigured: () => true },
         },
         ...buildRepoProviders(parties),
         JwtAuthGuard,
@@ -352,7 +352,7 @@ describe('POST /api/v1/reminders/send', () => {
           RemindersService,
           {
             provide: SmsService,
-            useValue: { sendSms: throttleSendSms, isConfigured: () => false },
+            useValue: { sendSms: throttleSendSms, sendOtpSms: throttleSendSms, sendTransactionalSms: throttleSendSms, isConfigured: () => false, isTransactionalConfigured: () => true },
           },
           ...buildRepoProviders(throttleParties),
           JwtAuthGuard,

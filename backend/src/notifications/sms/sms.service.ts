@@ -5,15 +5,24 @@ import axios from 'axios';
 const DEFAULT_TIMEOUT_MS = 5000;
 
 /**
- * The single client for the Android SMS Gateway.
+ * SMS delivery, split by purpose.
  *
- * There were previously two incompatible payload shapes aimed at the same
- * gateway: this service posted `{ phoneNumber, message }` to the bare
- * SMS_GATEWAY_URL, while AuthService and RemindersService posted
- * `{ phoneNumbers: [...], message }` to `<base>/messages`. The latter is what
- * the OTP login path uses in production, so it is the canonical shape and lives
- * here. AuthService and RemindersService now delegate rather than
- * reimplementing it, so the two shapes cannot drift apart again.
+ * TextBee is an OTP-delivery channel only. It is a personal-device gateway
+ * with a small monthly allowance, and routing customer-facing traffic through
+ * it both exhausts that allowance (which then takes login down for everyone,
+ * since OTP shares the same quota) and sends business messages from a number
+ * customers have no relationship with.
+ *
+ * So there are two distinct entry points, and callers must pick deliberately:
+ *
+ *   sendOtpSms()           -> TextBee. Authentication only.
+ *   sendTransactionalSms() -> a separately configured transactional provider.
+ *
+ * There is deliberately no transactional provider configured today, so
+ * sendTransactionalSms() is a no-op that reports "not sent". That is the
+ * intended state: the alternative — quietly falling back to TextBee — is the
+ * bug this split exists to remove. Wiring a real provider means implementing
+ * only `deliverTransactional` below; no caller changes.
  */
 @Injectable()
 export class SmsService {
@@ -21,12 +30,68 @@ export class SmsService {
 
   constructor(private configService: ConfigService) {}
 
-  /** True when TextBee is configured; otherwise sends are mocked. */
+  /** True when TextBee is configured. OTP-path only — see class comment. */
   isConfigured(): boolean {
     return (
       !!this.configService.get<string>('TEXTBEE_API_KEY')?.trim() &&
       !!this.configService.get<string>('TEXTBEE_DEVICE_ID')?.trim()
     );
+  }
+
+  /**
+   * True when a dedicated transactional SMS provider is configured.
+   *
+   * Deliberately independent of [isConfigured]: TextBee being available must
+   * never make transactional sending look available.
+   */
+  isTransactionalConfigured(): boolean {
+    return !!this.configService
+      .get<string>('TRANSACTIONAL_SMS_PROVIDER')
+      ?.trim();
+  }
+
+  /**
+   * Customer-facing SMS (ledger entries, party welcome, reminders).
+   *
+   * Returns false without sending while no transactional provider is
+   * configured. Every caller already treats a false return as "not
+   * delivered" and continues — the ledger write, party create and reminder
+   * run all complete regardless, because none of them has ever depended on
+   * SMS succeeding.
+   */
+  async sendTransactionalSms(
+    phoneNumber: string,
+    message: string,
+  ): Promise<boolean> {
+    if (!this.isTransactionalConfigured()) {
+      this.logger.log(
+        `Transactional SMS not configured; skipping message to ${phoneNumber}. ` +
+          `TextBee is reserved for OTP and is intentionally not used here.`,
+      );
+      return false;
+    }
+    return this.deliverTransactional(phoneNumber, message);
+  }
+
+  /**
+   * Hook for a real transactional provider. Unreachable until
+   * TRANSACTIONAL_SMS_PROVIDER is set, at which point this is the only method
+   * that needs an implementation.
+   */
+  private async deliverTransactional(
+    phoneNumber: string,
+    _message: string,
+  ): Promise<boolean> {
+    this.logger.warn(
+      `TRANSACTIONAL_SMS_PROVIDER is set but no transport is implemented; ` +
+        `message to ${phoneNumber} was not sent.`,
+    );
+    return false;
+  }
+
+  /** OTP delivery via TextBee. Authentication messages only. */
+  async sendOtpSms(phoneNumber: string, message: string): Promise<boolean> {
+    return this.sendViaTextBee(phoneNumber, message);
   }
 
   /**
@@ -59,9 +124,15 @@ export class SmsService {
   }
 
   /**
-   * Sends one message via TextBee API. Returns false rather than throwing.
+   * Sends one message via the TextBee API. Returns false rather than throwing.
+   *
+   * Private: reaching TextBee goes through [sendOtpSms], so a future caller
+   * cannot route customer traffic here by accident.
    */
-  async sendSms(phoneNumber: string, message: string): Promise<boolean> {
+  private async sendViaTextBee(
+    phoneNumber: string,
+    message: string,
+  ): Promise<boolean> {
     if (!this.isConfigured()) {
       this.logger.warn(
         `TextBee API not configured. Mocking SMS to ${phoneNumber}: ${message}`,

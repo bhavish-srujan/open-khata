@@ -65,9 +65,12 @@ fun SmsSettingsScreen(
     var txAddedTemplate by remember(bizId) { mutableStateOf(prefs.getString("template_transaction_added_$bizId", "Dear {{customer_name}}, {{business_name}} {{action}}. {{balance_text}}.")!!) }
     var txUpdatedTemplate by remember(bizId) { mutableStateOf(prefs.getString("template_transaction_updated_$bizId", "Dear {{customer_name}}, a transaction was updated at {{business_name}}. New Balance: ₹{{balance}}.")!!) }
     
+    // Off unless this account has explicitly turned it on — see
+    // TRANSACTION_SMS_DEFAULT. A stored preference always wins, so an existing
+    // user who enabled this keeps it enabled.
     var sendTransactionSms by remember(bizId) {
         val key = "send_transaction_sms_$bizId"
-        mutableStateOf(prefs.getBoolean(key, true))
+        mutableStateOf(prefs.getBoolean(key, com.example.khatabook.data.repository.TRANSACTION_SMS_DEFAULT))
     }
     
     val simOptions = listOf("Default", "SIM 1 (Jio)", "SIM 2 (Airtel)")

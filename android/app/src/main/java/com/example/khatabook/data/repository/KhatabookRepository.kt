@@ -65,6 +65,24 @@ internal data class MutationSnapshot(
 )
 
 /**
+ * A scanned collection row that matched several existing customers closely
+ * enough that picking one automatically would be a guess.
+ *
+ * Carries everything needed to complete the entry once the user chooses, so
+ * resolving it never requires re-scanning the sheet.
+ */
+data class AmbiguousScanRecord(
+    val id: String = java.util.UUID.randomUUID().toString(),
+    val scannedName: String,
+    val amount: Double,
+    val date: String,
+    val businessId: String,
+    /** Existing parties to offer, by id — resolved against live state at
+     *  display time so a deleted party cannot be shown as a choice. */
+    val candidateIds: List<String>
+)
+
+/**
  * How long a cached cashflow report is trusted before a background refresh
  * is due. Short on purpose: unlike parties/entries/items/staff, a report is a
  * derived figure over financial data, and this app has no server-push to say
@@ -75,14 +93,35 @@ internal data class MutationSnapshot(
 internal const val CASHFLOW_TTL_MS = 2 * 60 * 1000L
 
 /**
- * Stand-in phone number for a party created from a Smart AI Sheet Scan with
- * no real number on the sheet. The backend's CreatePartyDto requires a
- * non-blank, phone-shaped value (`@IsNotEmpty` + a format regex), so the
- * create cannot simply omit it — but this value must never be treated as a
- * real, messageable number: [KhatabookRepository] checks against it before
- * ever attempting to send a customer-facing SMS.
+ * Legacy stand-in phone number, retained for records already stored with it.
+ *
+ * It existed because the backend's CreatePartyDto used to require a
+ * non-blank, phone-shaped value, so a Scan Khata party with no number on the
+ * sheet had to send *something*. The phone is optional on both sides now and
+ * new parties store a genuinely blank value instead — a fabricated number is
+ * indistinguishable from a real one downstream, so the app would happily try
+ * to dial or message it.
+ *
+ * Still referenced (not deleted) because deployed devices and the production
+ * database hold parties carrying this value: every "is this a real, contactable
+ * number?" check must keep excluding it.
  */
 internal const val PLACEHOLDER_CUSTOMER_PHONE = "+910000000000"
+
+/**
+ * What the "Send transaction SMS" toggle means for an account that has never
+ * configured it — off.
+ *
+ * Only a *default*: SharedPreferences returns a stored value whenever one
+ * exists, so an existing user who explicitly turned the toggle on keeps it on.
+ * This changes nothing for them; it only stops a brand-new account from
+ * messaging customers before its owner has asked for that.
+ *
+ * Every read of the key goes through this constant so the default cannot
+ * drift between the repository, the settings screen and the entry dialog —
+ * which is exactly how the key's business-scoping bug went unnoticed before.
+ */
+internal const val TRANSACTION_SMS_DEFAULT = false
 
 /**
  * Production persistence for [KhatabookRepository]: `EncryptedSharedPreferences`
@@ -936,7 +975,16 @@ class KhatabookRepository(
                         note = r.note ?: "",
                         paymentMethod = r.paymentMethod,
                         source = if (r.source == "OCR") EntrySource.OCR else EntrySource.MANUAL,
-                        status = EntryStatus.CONFIRMED
+                        status = EntryStatus.CONFIRMED,
+                        // The server's own timestamp, not "now". Omitting this
+                        // let LedgerEntry's default stamp the restore time onto
+                        // every synced row, so after a local-data wipe the whole
+                        // history collapsed onto a single day and every
+                        // daily/weekly/monthly report derived from it was wrong.
+                        createdAt = com.example.khatabook.utils.IsoTime.parseOrDefault(
+                            r.createdAt,
+                            System.currentTimeMillis()
+                        )
                     )
                 }
                 val serverIds = mapped.map { it.id }.toSet()
@@ -1324,6 +1372,36 @@ class KhatabookRepository(
     val isRestoringFromCloud: StateFlow<Boolean> = _isRestoringFromCloud.asStateFlow()
 
     /**
+     * Scanned rows that resemble more than one existing customer, held for the
+     * user to resolve.
+     *
+     * Deliberately in memory only, and deliberately not auto-resolved: money
+     * is never attached to a guessed party, and a scan the user has not
+     * confirmed is not a mutation worth persisting to the Outbox. If the
+     * process dies before they answer, the scan is simply re-run — which is
+     * strictly safer than having silently written to the wrong ledger.
+     */
+    private val _pendingScanMatches = MutableStateFlow<List<AmbiguousScanRecord>>(emptyList())
+    val pendingScanMatches: StateFlow<List<AmbiguousScanRecord>> = _pendingScanMatches.asStateFlow()
+
+    /** Clears a pending scan once the user has decided what to do with it. */
+    fun resolvePendingScanMatch(record: AmbiguousScanRecord) {
+        _pendingScanMatches.value = _pendingScanMatches.value.filterNot { it.id == record.id }
+    }
+
+    /** Attaches an ambiguous scan to the party the user picked. */
+    fun confirmScanMatch(record: AmbiguousScanRecord, partyId: String) {
+        resolvePendingScanMatch(record)
+        addLedgerEntry(
+            partyId = partyId,
+            amount = record.amount,
+            type = TransactionType.GOT,
+            note = "Scan Khata Collection: ${record.date}",
+            source = EntrySource.OCR
+        )
+    }
+
+    /**
      * Rebuilds this account's local database from PostgreSQL — the path a
      * fresh install, a cleared app storage, or a brand new device all take.
      * PostgreSQL is the authoritative cloud copy; Room is empty here only
@@ -1382,10 +1460,20 @@ class KhatabookRepository(
         interestPeriodValue: Int = 0,
         interestPeriodUnit: com.example.khatabook.data.model.InterestPeriodUnit = com.example.khatabook.data.model.InterestPeriodUnit.DAYS
     ): Party {
+        // Canonical name form, applied here so every creation path — typed
+        // entry, contacts picker, Scan Khata — stores the same shape and
+        // matching never has to guess about casing. Purely local: no network
+        // call is involved in normalising a name.
+        val canonicalName = com.example.khatabook.utils.PartyNames.normalize(name)
+        // A blank phone is stored blank. It is deliberately NOT replaced with
+        // a placeholder number: a fabricated "+910000000000" is
+        // indistinguishable from a real one downstream, and the app would
+        // happily try to message or dial it.
+        val cleanedPhone = phone.trim()
         val newParty = Party(
             businessId = businessId,
-            name = name,
-            phone = phone,
+            name = canonicalName,
+            phone = cleanedPhone,
             type = type,
             collectionFrequency = frequency,
             address = address,
@@ -1404,8 +1492,8 @@ class KhatabookRepository(
                 payload = gson.toJson(
                     CreatePartyRequest(
                         id = newParty.id,
-                        name = name,
-                        phone = phone,
+                        name = canonicalName,
+                        phone = cleanedPhone,
                         type = type.name,
                         // Omitted entirely (null) when interest isn't
                         // configured, so a plain create is byte-for-byte
@@ -1566,21 +1654,41 @@ class KhatabookRepository(
     ) {
         if (amountCollected <= 0) return
 
-        // 1. Find existing party or create a new party for this AI scanned customer inside current business account.
-        // Exact name match wins outright. Otherwise, a substring match is only
-        // trusted when exactly one party qualifies — a scanned "Ravi" must not
-        // get silently attributed to whichever of "Ravi Kumar"/"Ravi Traders"
-        // happens to come first in the list when both exist.
+        // 1. Resolve the scanned name to an existing party before considering
+        // creating one. See PartyMatcher for the priority order and why fuzzy
+        // matching is deliberately conservative — a wrong match here moves
+        // real money onto the wrong customer's ledger.
         val candidatesInBusiness = _parties.value.filter { it.businessId == businessId }
-        var existingParty = candidatesInBusiness.find { it.name.equals(customerCodeOrName, ignoreCase = true) }
-            ?: candidatesInBusiness.filter { it.name.contains(customerCodeOrName, ignoreCase = true) }
-                .singleOrNull()
+        val match = com.example.khatabook.utils.PartyMatcher.match(
+            scannedName = customerCodeOrName,
+            scannedPhone = newPhone,
+            candidates = candidatesInBusiness
+        )
+
+        var existingParty = (match as? com.example.khatabook.utils.PartyMatch.Matched)?.party
 
         if (existingParty == null) {
+            // Ambiguous means "several plausible existing customers" — creating
+            // a new one here is how "BHAVISH" silently became a second
+            // "BHAVISH 10". The record is left for the user to resolve rather
+            // than guessed at.
+            if (match is com.example.khatabook.utils.PartyMatch.Ambiguous) {
+                _pendingScanMatches.value = _pendingScanMatches.value + AmbiguousScanRecord(
+                    scannedName = customerCodeOrName,
+                    amount = amountCollected,
+                    date = date,
+                    businessId = businessId,
+                    candidateIds = match.candidates.map { it.id }
+                )
+                return
+            }
             if (isNewCustomer) {
                 existingParty = addParty(
+                    // Stored blank when the scan carried no number: a
+                    // fabricated placeholder would be treated as a real,
+                    // dialable, messageable number everywhere downstream.
                     name = customerCodeOrName,
-                    phone = newPhone.ifBlank { PLACEHOLDER_CUSTOMER_PHONE },
+                    phone = newPhone.trim(),
                     type = PartyType.CUSTOMER,
                     businessId = businessId
                 )
@@ -1665,7 +1773,7 @@ class KhatabookRepository(
         // retroactively change whether it gets notified.
         val smsSettings = context.getSharedPreferences("sms_settings", Context.MODE_PRIVATE)
         val smsBizId = activeBusiness.value?.id ?: ""
-        val sendTransactionSms = smsSettings.getBoolean("send_transaction_sms_$smsBizId", true)
+        val sendTransactionSms = smsSettings.getBoolean("send_transaction_sms_$smsBizId", TRANSACTION_SMS_DEFAULT)
         if (updatedParty != null && updatedParty.phone.isNotBlank() && updatedParty.phone != PLACEHOLDER_CUSTOMER_PHONE && updatedParty.type == PartyType.CUSTOMER) {
             if (sendTransactionSms && smsSettings.getString("sender_mode_$smsBizId", "MY_NUMBER") == "MY_NUMBER") {
                 remoteScope.launch {
@@ -1785,7 +1893,7 @@ class KhatabookRepository(
 
         val smsSettings = context.getSharedPreferences("sms_settings", Context.MODE_PRIVATE)
         val smsBizId = activeBusiness.value?.id ?: ""
-        val sendTransactionSms = smsSettings.getBoolean("send_transaction_sms_$smsBizId", true)
+        val sendTransactionSms = smsSettings.getBoolean("send_transaction_sms_$smsBizId", TRANSACTION_SMS_DEFAULT)
         if (sendTransactionSms && smsSettings.getString("sender_mode_$smsBizId", "MY_NUMBER") == "MY_NUMBER") {
             val updatedParty = _parties.value.find { it.id == oldEntry.partyId }
             if (updatedParty != null && updatedParty.phone.isNotBlank() && updatedParty.phone != PLACEHOLDER_CUSTOMER_PHONE && updatedParty.type == PartyType.CUSTOMER) {

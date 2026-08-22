@@ -54,7 +54,7 @@ describe('customer-facing SMS content', () => {
           LedgerService,
           { provide: getRepositoryToken(LedgerEntry), useValue: {} },
           { provide: getRepositoryToken(Party), useValue: {} },
-          { provide: SmsService, useValue: { sendSms } },
+          { provide: SmsService, useValue: { sendSms, sendOtpSms: sendSms, sendTransactionalSms: sendSms } },
           { provide: DataSource, useValue: { transaction: (cb: any) => cb(manager) } },
         ],
       }).compile();
@@ -169,7 +169,7 @@ describe('customer-facing SMS content', () => {
             provide: getRepositoryToken(Business),
             useValue: { findOne: async () => business },
           },
-          { provide: SmsService, useValue: { sendSms } },
+          { provide: SmsService, useValue: { sendSms, sendOtpSms: sendSms, sendTransactionalSms: sendSms } },
           {
             // PartyService.delete removes dependents transactionally; unused by
             // these tests but required to construct the service.

@@ -17,21 +17,21 @@ jest.mock('axios');
 const mockedAxios = axios as jest.Mocked<typeof axios>;
 
 /**
- * Every outbound SMS must hit the gateway with one payload shape.
+ * TextBee carries OTP traffic and nothing else.
  *
- * This suite previously pinned an earlier, generic-gateway design
- * (SMS_GATEWAY_URL, Basic Auth, `{phoneNumbers, message}`). That design was
- * superseded by the TextBee integration SmsService actually implements
- * today (TEXTBEE_API_KEY / TEXTBEE_DEVICE_ID, x-api-key auth, `{receivers,
- * smsBody}`) — see sms.service.spec.ts for the direct coverage of that
- * contract.
+ * This suite used to assert the opposite: that all four senders (reminder,
+ * welcome, per-transaction, OTP) hit TextBee with one identical envelope.
+ * That was the bug. TextBee is a personal-device gateway on a small monthly
+ * allowance, so customer-facing messages both burned the allowance that OTP
+ * login depends on — taking sign-in down for everyone once it ran out — and
+ * reached customers from a number with no relationship to the business.
  *
- * OTP delivery does not go over WhatsApp: there is no WhatsApp integration in
- * this codebase at all. AuthService.requestOtp() calls SmsService.sendSms()
- * directly and exclusively — TextBee is the only OTP provider, with no
- * fallback. So OTP is not an exception here: all four senders (reminder,
- * welcome message, per-transaction update, and OTP) must agree on one
- * envelope, and that is what this file asserts.
+ * The invariant is now the separation itself: only AuthService.requestOtp()
+ * may reach TextBee, and it still does so with the canonical envelope
+ * (TEXTBEE_API_KEY / TEXTBEE_DEVICE_ID, x-api-key auth, `{receivers,
+ * smsBody}`) — see sms.service.spec.ts for direct coverage of that contract.
+ * Every other sender routes through sendTransactionalSms(), which sends
+ * nothing at all while no transactional provider is configured.
  */
 describe('SMS payload consistency across every sender', () => {
   const membershipRole: any = 'OWNER';
@@ -146,52 +146,74 @@ describe('SMS payload consistency across every sender', () => {
     apiKeyHeader: API_KEY,
   };
 
-  it('reminder send (RemindersService) uses the canonical envelope', async () => {
-    await remindersService.sendReminder(PHONE, 500, 'Rahul Traders');
+  it('reminder send does NOT reach TextBee — it is customer-facing, not OTP', async () => {
+    // Reports the capability as unavailable rather than quietly falling back
+    // to the OTP gateway.
+    await expect(
+      remindersService.sendReminder(PHONE, 500, 'Rahul Traders'),
+    ).rejects.toThrow(/no SMS provider is configured/i);
 
-    expect(mockedAxios.post).toHaveBeenCalledTimes(1);
-    expect(capturedEnvelope()).toEqual(EXPECTED_ENVELOPE);
+    expect(mockedAxios.post).not.toHaveBeenCalled();
   });
 
-  it('welcome send (PartyService) uses the canonical envelope', async () => {
+  it('welcome send does NOT reach TextBee', async () => {
     await partyService.create('biz-1', {
       name: 'Rahul Traders',
       phone: PHONE,
       type: 'CUSTOMER',
     });
 
-    expect(mockedAxios.post).toHaveBeenCalledTimes(1);
-    expect(capturedEnvelope()).toEqual(EXPECTED_ENVELOPE);
+    expect(mockedAxios.post).not.toHaveBeenCalled();
   });
 
-  it('direct send (SmsService) uses the canonical envelope', async () => {
-    await smsService.sendSms(PHONE, 'transaction recorded');
+  it('transactional send does NOT reach TextBee while no provider is configured', async () => {
+    const delivered = await smsService.sendTransactionalSms(
+      PHONE,
+      'transaction recorded',
+    );
 
-    expect(mockedAxios.post).toHaveBeenCalledTimes(1);
-    expect(capturedEnvelope()).toEqual(EXPECTED_ENVELOPE);
+    expect(delivered).toBe(false);
+    expect(mockedAxios.post).not.toHaveBeenCalled();
   });
 
-  it('OTP send also uses the canonical envelope — it is not a special case', async () => {
+  it('OTP send DOES use TextBee, with the canonical envelope', async () => {
     await authService.requestOtp(PHONE);
 
     expect(mockedAxios.post).toHaveBeenCalledTimes(1);
     expect(capturedEnvelope()).toEqual(EXPECTED_ENVELOPE);
   });
 
-  it('every SMS sender, OTP included, produces a byte-identical envelope', async () => {
-    const envelopes: any[] = [];
-
-    for (const send of [
-      () => remindersService.sendReminder(PHONE, 500, 'Rahul Traders'),
+  it('OTP is the only sender that touches TextBee', async () => {
+    const nonOtpSenders = [
+      // Rejects (capability unavailable) rather than falling back to TextBee.
+      () =>
+        remindersService
+          .sendReminder(PHONE, 500, 'Rahul Traders')
+          .catch(() => undefined),
       () =>
         partyService.create('biz-1', {
           name: 'Rahul Traders',
           phone: PHONE,
           type: 'CUSTOMER' as const,
         }),
-      () => smsService.sendSms(PHONE, 'transaction recorded'),
-      () => authService.requestOtp(PHONE),
-    ]) {
+      () => smsService.sendTransactionalSms(PHONE, 'transaction recorded'),
+    ];
+
+    for (const send of nonOtpSenders) {
+      mockedAxios.post.mockClear();
+      await send();
+      expect(mockedAxios.post).not.toHaveBeenCalled();
+    }
+
+    mockedAxios.post.mockClear();
+    await authService.requestOtp(PHONE);
+    expect(mockedAxios.post).toHaveBeenCalledTimes(1);
+  });
+
+  it('the OTP envelope is well-formed', async () => {
+    const envelopes: any[] = [];
+
+    for (const send of [() => authService.requestOtp(PHONE)]) {
       mockedAxios.post.mockClear();
       await send();
       envelopes.push(capturedEnvelope());
@@ -208,9 +230,14 @@ describe('SMS payload consistency across every sender', () => {
     });
 
     it('reminder surfaces the failure to the client', async () => {
+      // Still surfaces rather than silently reporting success. The reason
+      // differs now: reminders no longer reach TextBee at all, so they fail
+      // at the "no transactional provider" check before any gateway call —
+      // which is why this asserts a rejection rather than the old
+      // gateway-specific message.
       await expect(
         remindersService.sendReminder(PHONE, 500, 'Rahul Traders'),
-      ).rejects.toThrow('Failed to send Reminder');
+      ).rejects.toThrow(/no SMS provider is configured|Failed to send Reminder/i);
     });
 
     it('party create still succeeds when the welcome SMS fails', async () => {
@@ -220,7 +247,7 @@ describe('SMS payload consistency across every sender', () => {
           phone: PHONE,
           type: 'CUSTOMER',
         }),
-      ).resolves.toMatchObject({ name: 'Rahul Traders' });
+      ).resolves.toMatchObject({ name: 'RAHUL TRADERS' });
     });
   });
 });

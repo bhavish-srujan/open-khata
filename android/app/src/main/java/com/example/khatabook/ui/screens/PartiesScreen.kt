@@ -93,7 +93,6 @@ fun PartiesScreen(
     var selectedTab by remember { mutableStateOf(PartyType.CUSTOMER) }
     var searchQuery by remember { mutableStateOf("") }
     var frequencyFilter by remember { mutableStateOf<CollectionFrequency?>(null) }
-    var showFilterChips by remember { mutableStateOf(false) }
     var showAiSheetScannerDialog by remember { mutableStateOf(false) }
 
     // Long Press Delete Customer Flow States
@@ -435,18 +434,6 @@ fun PartiesScreen(
                                 )
                             }
 
-                            Row(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .bounceClick { showFilterChips = !showFilterChips }
-                                    .background(if (showFilterChips || frequencyFilter != null) Color(0xFFEFF6FF) else Color.Transparent)
-                                    .padding(horizontal = 8.dp, vertical = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(Icons.Default.FilterList, contentDescription = "Filters", tint = KhatabookHeaderBlue, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Filters", fontSize = 11.sp, color = KhatabookHeaderBlue, fontWeight = FontWeight.Bold)
-                            }
                         }
                     }
 
@@ -467,11 +454,11 @@ fun PartiesScreen(
                     }
                 }
 
-                AnimatedVisibility(
-                    visible = showFilterChips,
-                    enter = expandVertically(animationSpec = tween(150, easing = EmphasizedSmoothEasing)) + fadeIn(tween(150)),
-                    exit = shrinkVertically(animationSpec = tween(150, easing = EmphasizedSmoothEasing)) + fadeOut(tween(150))
-                ) {
+                // Always visible: the collection-frequency filter is part of
+                // browsing the list, not a mode to be entered, so it no longer
+                // sits behind a Filters toggle. A single scrollable chip row
+                // keeps it compact — the filtering logic itself is unchanged.
+                run {
                     LazyRow(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         modifier = Modifier

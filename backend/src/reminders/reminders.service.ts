@@ -5,6 +5,7 @@ import {
   HttpException,
   HttpStatus,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -111,9 +112,28 @@ export class RemindersService {
 
     const message = `Dear ${partyName}, this is a gentle reminder that an amount of Rs. ${amount} is pending. Please clear it at the earliest.`;
 
-    // URL building, E.164 normalisation and the payload shape all live in
-    // SmsService, so this path and the OTP path cannot diverge again.
-    const sent = await this.smsService.sendSms(phoneNumber, message);
+    // Payment reminders are customer-facing, so they use the transactional
+    // channel. TextBee is OTP-only — see SmsService.
+    //
+    // "No transactional provider configured" is reported separately from "the
+    // provider rejected this message". The first is a server capability that
+    // is switched off, not a fault in the caller's request, so answering 400
+    // would both misattribute the cause and tell the user to retry something
+    // that cannot succeed until the server is configured. This mirrors how
+    // AuthService reports unconfigured OTP delivery.
+    if (!this.smsService.isTransactionalConfigured()) {
+      this.logger.warn(
+        `Reminder to ${phoneNumber} not sent: no transactional SMS provider is configured.`,
+      );
+      throw new ServiceUnavailableException(
+        'Reminders are unavailable: no SMS provider is configured.',
+      );
+    }
+
+    const sent = await this.smsService.sendTransactionalSms(
+      phoneNumber,
+      message,
+    );
 
     if (!sent) {
       this.logger.error(`Failed to send reminder to ${phoneNumber}`);
@@ -122,9 +142,7 @@ export class RemindersService {
 
     return {
       success: true,
-      message: this.smsService.isConfigured()
-        ? 'Reminder Sent successfully'
-        : 'Reminder Sent successfully (Mock)',
+      message: 'Reminder Sent successfully',
     };
   }
 }

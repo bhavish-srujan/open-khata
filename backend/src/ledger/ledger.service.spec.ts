@@ -91,7 +91,7 @@ describe('LedgerService — idempotent create', () => {
         LedgerService,
         { provide: getRepositoryToken(LedgerEntry), useValue: {} },
         { provide: getRepositoryToken(Party), useValue: {} },
-        { provide: SmsService, useValue: { sendSms } },
+        { provide: SmsService, useValue: { sendSms, sendOtpSms: sendSms, sendTransactionalSms: sendSms } },
         {
           provide: DataSource,
           useValue: { transaction: (cb: any) => cb(manager) },

@@ -45,7 +45,7 @@ describe('SmsService', () => {
 
   describe('payload shape', () => {
     it("posts receivers[] and smsBody — TextBee's field names, not the generic gateway's", async () => {
-      await service.sendSms('9876543210', 'hello');
+      await service.sendOtpSms('9876543210', 'hello');
 
       const [, payload] = mockedAxios.post.mock.calls[0] as any;
       expect(payload).toEqual({
@@ -57,7 +57,7 @@ describe('SmsService', () => {
     });
 
     it('sends JSON with the API key header and a timeout — not Basic Auth', async () => {
-      await service.sendSms('9876543210', 'hello');
+      await service.sendOtpSms('9876543210', 'hello');
 
       const [, , config] = mockedAxios.post.mock.calls[0] as any;
       expect(config.headers['Content-Type']).toBe('application/json');
@@ -70,7 +70,7 @@ describe('SmsService', () => {
       env.SMS_GATEWAY_TIMEOUT_MS = '1200';
       service = await build();
 
-      await service.sendSms('9876543210', 'hello');
+      await service.sendOtpSms('9876543210', 'hello');
 
       const [, , config] = mockedAxios.post.mock.calls[0] as any;
       expect(config.timeout).toBe(1200);
@@ -79,7 +79,7 @@ describe('SmsService', () => {
 
   describe('target url', () => {
     it('is built from TEXTBEE_DEVICE_ID', async () => {
-      await service.sendSms('9876543210', 'hello');
+      await service.sendOtpSms('9876543210', 'hello');
 
       expect(mockedAxios.post.mock.calls[0][0]).toBe(
         'https://api.textbee.dev/api/v1/gateway/devices/device-123/send-sms',
@@ -99,7 +99,7 @@ describe('SmsService', () => {
       env.TEXTBEE_DEVICE_ID = deviceId;
       service = await build();
 
-      await service.sendSms('9876543210', 'hello');
+      await service.sendOtpSms('9876543210', 'hello');
 
       expect(mockedAxios.post.mock.calls[0][0]).toBe(expected);
     });
@@ -115,14 +115,14 @@ describe('SmsService', () => {
       ['+91-98765-43210', '+919876543210'],
       ['(098) 765 43210', '+919876543210'],
     ])('%s -> %s', async (input, expected) => {
-      await service.sendSms(input, 'hello');
+      await service.sendOtpSms(input, 'hello');
 
       const [, payload] = mockedAxios.post.mock.calls[0] as any;
       expect(payload.receivers).toEqual([expected]);
     });
 
     it('leaves an already-E.164 foreign number alone', async () => {
-      await service.sendSms('+14155550123', 'hello');
+      await service.sendOtpSms('+14155550123', 'hello');
 
       const [, payload] = mockedAxios.post.mock.calls[0] as any;
       expect(payload.receivers).toEqual(['+14155550123']);
@@ -134,7 +134,7 @@ describe('SmsService', () => {
       env = {};
       service = await build();
 
-      await expect(service.sendSms('9876543210', 'hello')).resolves.toBe(true);
+      await expect(service.sendOtpSms('9876543210', 'hello')).resolves.toBe(true);
       expect(mockedAxios.post).not.toHaveBeenCalled();
     });
 
@@ -142,14 +142,14 @@ describe('SmsService', () => {
       env = { TEXTBEE_API_KEY: 'txb_test_key' };
       service = await build();
 
-      await expect(service.sendSms('9876543210', 'hello')).resolves.toBe(true);
+      await expect(service.sendOtpSms('9876543210', 'hello')).resolves.toBe(true);
       expect(mockedAxios.post).not.toHaveBeenCalled();
     });
 
     it('returns false instead of throwing when the gateway errors', async () => {
       mockedAxios.post.mockRejectedValue(new Error('ECONNREFUSED'));
 
-      await expect(service.sendSms('9876543210', 'hello')).resolves.toBe(false);
+      await expect(service.sendOtpSms('9876543210', 'hello')).resolves.toBe(false);
     });
   });
 

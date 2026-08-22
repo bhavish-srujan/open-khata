@@ -106,7 +106,7 @@ describe('AuthService — OTP hardening', () => {
           // Configured by default: these tests exercise OTP hardening logic,
           // not delivery configuration. The "OTP delivery provider" describe
           // block below covers isConfigured() explicitly.
-          useValue: { isConfigured, sendSms },
+          useValue: { isConfigured, sendSms, sendOtpSms: sendSms },
         },
       ],
     }).compile();
@@ -288,7 +288,7 @@ describe('AuthService — OTP hardening', () => {
 
     it('does not report success when TextBee is not configured', async () => {
       seedUser({ currentOtp: null, otpExpiry: null });
-      // SmsService.sendSms() itself would mock a successful send here — the
+      // SmsService.sendOtpSms() itself would mock a successful send here — the
       // right behaviour for reminders/welcome texts, wrong for a login code.
       isConfigured.mockReturnValue(false);
 

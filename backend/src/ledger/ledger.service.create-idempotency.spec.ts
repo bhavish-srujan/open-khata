@@ -192,7 +192,7 @@ describe('LedgerService.create() — idempotency under concurrency', () => {
         { provide: getRepositoryToken(Party), useValue: {} },
         {
           provide: SmsService,
-          useValue: { sendSms: jest.fn().mockResolvedValue(true) },
+          useValue: (() => { const f = jest.fn().mockResolvedValue(true); return { sendSms: f, sendOtpSms: f, sendTransactionalSms: f }; })(),
         },
         { provide: DataSource, useValue: dataSource },
       ],

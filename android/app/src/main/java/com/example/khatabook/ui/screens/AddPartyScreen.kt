@@ -110,7 +110,10 @@ fun AddPartyScreen(
     val scrollState = rememberScrollState()
 
     fun trySave() {
-        if (partyName.isBlank() || mobileNumber.isBlank()) return
+        // Name is the only required field. A phone number is contact detail,
+        // not identity — a shopkeeper routinely records a customer before ever
+        // having one, and blocking that forced fake numbers into the ledger.
+        if (partyName.isBlank()) return
 
         val rate = interestRateText.toDoubleOrNull()
         val period = interestPeriodValueText.toIntOrNull()
@@ -220,7 +223,7 @@ fun AddPartyScreen(
                 OutlinedTextField(
                     value = mobileNumber,
                     onValueChange = { mobileNumber = it },
-                    placeholder = { Text("Mobile Number", fontSize = 13.sp) },
+                    placeholder = { Text("Mobile Number (optional)", fontSize = 13.sp) },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                     modifier = Modifier.weight(1f),
