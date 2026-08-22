@@ -450,25 +450,35 @@ fun CashbookReportScreen(
                     modifier = Modifier.padding(horizontal = 24.dp)
                 )
             }
-            DatePicker(
-                state = if (pickingStart) startState else endState,
-                showModeToggle = false,
-                // The picker carries its own title, so the dialog no longer
-                // adds a second one above it — previously "Select start date"
-                // sat directly above the picker's own "Select date", with the
-                // pair eating enough height to crowd the calendar.
-                title = {
-                    Text(
-                        if (pickingStart) "Select start date" else "Select end date",
-                        modifier = Modifier.padding(start = 24.dp, top = 16.dp),
-                        fontWeight = FontWeight.Bold,
-                        color = KhatabookTextDark,
-                    )
-                },
-                // App blue rather than the stock Material purple, matching
-                // every other control on this screen.
-                colors = khatabookDatePickerColors(),
-            )
+            // key(pickingStart): the start and end steps must be separate
+            // composables, not one picker with its state swapped underneath.
+            // DatePicker remembers its own month-scrolling state internally
+            // and without a key that state survived the swap, so the end step
+            // inherited the start step's scroll position and its month arrows
+            // then did nothing — navigation worked for the start date and was
+            // frozen for the end date. Keying disposes the first picker and
+            // composes the second fresh, in sync with its own state.
+            key(pickingStart) {
+                DatePicker(
+                    state = if (pickingStart) startState else endState,
+                    showModeToggle = false,
+                    // The picker carries its own title, so the dialog no longer
+                    // adds a second one above it — previously "Select start date"
+                    // sat directly above the picker's own "Select date", with the
+                    // pair eating enough height to crowd the calendar.
+                    title = {
+                        Text(
+                            if (pickingStart) "Select start date" else "Select end date",
+                            modifier = Modifier.padding(start = 24.dp, top = 16.dp),
+                            fontWeight = FontWeight.Bold,
+                            color = KhatabookTextDark,
+                        )
+                    },
+                    // App blue rather than the stock Material purple, matching
+                    // every other control on this screen.
+                    colors = khatabookDatePickerColors(),
+                )
+            }
         }
     }
 }
