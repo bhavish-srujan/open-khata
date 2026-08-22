@@ -410,7 +410,7 @@ fun CustomerLedgerScreen(
                     TextButton(onClick = { showDatePicker = false }) { Text("CANCEL") }
                 }
             ) {
-                DatePicker(state = pickerState)
+                DatePicker(state = pickerState, colors = khatabookDatePickerColors())
             }
         }
 

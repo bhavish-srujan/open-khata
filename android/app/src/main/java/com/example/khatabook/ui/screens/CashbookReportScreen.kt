@@ -27,6 +27,7 @@ import com.example.khatabook.data.repository.KhatabookRepository
 import com.example.khatabook.ui.components.BounceButton
 import com.example.khatabook.ui.components.BounceIconButton
 import com.example.khatabook.ui.components.BounceTextButton
+import com.example.khatabook.ui.components.khatabookDatePickerColors
 import com.example.khatabook.ui.theme.*
 import com.example.khatabook.utils.PdfGenerator
 import com.example.khatabook.data.model.CollectionFrequency
@@ -394,21 +395,17 @@ fun CashbookReportScreen(
         val endState = rememberDatePickerState(initialSelectedDateMillis = customEndMs)
         var pickingStart by remember { mutableStateOf(true) }
 
-        AlertDialog(
+        // DatePickerDialog, not AlertDialog: a calendar grid needs about 360dp
+        // for its seven columns, and AlertDialog caps its content at the
+        // narrower standard dialog width. The Saturday column was being
+        // clipped — six weekday headers instead of seven, with the dates in
+        // that column sliced down the middle.
+        DatePickerDialog(
             onDismissRequest = {
                 // Cancel preserves the previous selection — nothing is applied.
                 showDateRangePicker = false
                 if (period == ReportPeriod.DATE_RANGE && (customStartMs == null || customEndMs == null)) {
                     period = ReportPeriod.THIS_MONTH
-                }
-            },
-            title = { Text(if (pickingStart) "Select start date" else "Select end date") },
-            text = {
-                Column {
-                    if (rangeValidationError != null) {
-                        Text(rangeValidationError!!, color = KhatabookGiveRed, fontSize = 12.sp, modifier = Modifier.padding(bottom = 8.dp))
-                    }
-                    DatePicker(state = if (pickingStart) startState else endState, showModeToggle = false)
                 }
             },
             confirmButton = {
@@ -442,9 +439,37 @@ fun CashbookReportScreen(
                     if (customStartMs == null || customEndMs == null) {
                         period = ReportPeriod.THIS_MONTH
                     }
-                }) { Text("Cancel") }
+                }) { Text("CANCEL") }
             }
-        )
+        ) {
+            if (rangeValidationError != null) {
+                Text(
+                    rangeValidationError!!,
+                    color = KhatabookGiveRed,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(horizontal = 24.dp)
+                )
+            }
+            DatePicker(
+                state = if (pickingStart) startState else endState,
+                showModeToggle = false,
+                // The picker carries its own title, so the dialog no longer
+                // adds a second one above it — previously "Select start date"
+                // sat directly above the picker's own "Select date", with the
+                // pair eating enough height to crowd the calendar.
+                title = {
+                    Text(
+                        if (pickingStart) "Select start date" else "Select end date",
+                        modifier = Modifier.padding(start = 24.dp, top = 16.dp),
+                        fontWeight = FontWeight.Bold,
+                        color = KhatabookTextDark,
+                    )
+                },
+                // App blue rather than the stock Material purple, matching
+                // every other control on this screen.
+                colors = khatabookDatePickerColors(),
+            )
+        }
     }
 }
 

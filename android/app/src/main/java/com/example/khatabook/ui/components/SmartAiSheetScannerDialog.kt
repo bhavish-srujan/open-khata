@@ -121,7 +121,7 @@ fun SmartAiSheetScannerDialog(
                 TextButton(onClick = { showSheetDatePicker = false }) { Text("CANCEL") }
             }
         ) {
-            DatePicker(state = pickerState)
+            DatePicker(state = pickerState, colors = khatabookDatePickerColors())
         }
     }
 
