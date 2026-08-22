@@ -55,7 +55,21 @@ import com.example.khatabook.ui.components.LedgerSheetRecord
 import com.example.khatabook.ui.components.SmartAiSheetScannerDialog
 import com.example.khatabook.ui.components.bounceClick
 import com.example.khatabook.utils.SmsSender
+import com.example.khatabook.utils.collectionTotals
 import com.example.khatabook.ui.theme.*
+
+/**
+ * Whether a party belongs to the selected collection. Null means "All".
+ *
+ * Shared by the party list and the You-will-get/give summary so the two can
+ * never disagree about which parties are in scope — they previously did, and
+ * the summary was the one that was wrong.
+ *
+ * Membership comes from the party's own persisted classification. It is never
+ * derived from a date, a week number or anything else about the transaction.
+ */
+private fun Party.matchesCollection(filter: CollectionFrequency?): Boolean =
+    filter == null || collectionFrequency == filter
 
 @Composable
 fun PartiesScreen(
@@ -148,18 +162,27 @@ fun PartiesScreen(
 
     var partyToRemind by remember { mutableStateOf<Party?>(null) }
 
-    // STRICT DATA ISOLATION PER BUSINESS ACCOUNT
-    val activeBusinessParties = remember(parties, selectedBusinessId) {
-        parties.filter { it.businessId == selectedBusinessId }
+    // STRICT DATA ISOLATION PER BUSINESS ACCOUNT, narrowed to the selected
+    // collection.
+    //
+    // The collection filter used to be missing here while the list below
+    // applied it, so choosing Weekly showed Weekly parties above a
+    // You-will-get/give total still summed over every collection. Both now go
+    // through matchesCollection, so the summary and the list cannot describe
+    // different sets of people.
+    val activeBusinessParties = remember(parties, selectedBusinessId, frequencyFilter) {
+        parties.filter { it.businessId == selectedBusinessId && it.matchesCollection(frequencyFilter) }
     }
 
-    // Memoized: only recalculate when the filtered party list changes (not on every recomposition)
-    val youWillGive = remember(activeBusinessParties) {
-        activeBusinessParties.filter { it.type == PartyType.CUSTOMER && it.currentBalance < 0 }.sumOf { kotlin.math.abs(it.currentBalance) }
+    // Memoized: only recalculates when the parties, the business or the
+    // selected collection change. Keyed on frequencyFilter as well, which is
+    // what makes tapping a chip update the figures immediately — the whole
+    // calculation is local, so nothing waits on the network.
+    val totals = remember(parties, selectedBusinessId, frequencyFilter) {
+        collectionTotals(parties, selectedBusinessId, frequencyFilter)
     }
-    val youWillGet = remember(activeBusinessParties) {
-        activeBusinessParties.filter { it.type == PartyType.CUSTOMER && it.currentBalance > 0 }.sumOf { it.currentBalance }
-    }
+    val youWillGet = totals.youWillGet
+    val youWillGive = totals.youWillGive
 
     Box(modifier = modifier.fillMaxSize().background(KhatabookBgLight)) {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -527,7 +550,8 @@ fun PartiesScreen(
                         val matchesBusiness = party.businessId == currentBizId
                         val matchesTab = party.type == currentTab
                         val matchesSearch = party.name.contains(searchQuery, ignoreCase = true) || party.phone.contains(searchQuery)
-                        val matchesFreq = frequencyFilter == null || party.collectionFrequency == frequencyFilter
+                        // Same predicate the summary totals use — see matchesCollection.
+                        val matchesFreq = party.matchesCollection(frequencyFilter)
                         matchesBusiness && matchesTab && matchesSearch && matchesFreq
                     }
                 }
