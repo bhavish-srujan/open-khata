@@ -119,13 +119,16 @@ export class LedgerService {
     const from = range.from ? new Date(range.from) : undefined;
     const to = range.to ? new Date(range.to) : undefined;
 
-    if (from && to) where.createdAt = Between(from, to);
-    else if (from) where.createdAt = MoreThanOrEqual(from);
-    else if (to) where.createdAt = LessThanOrEqual(to);
+    // Business date, matching the reports and the client's own Cashbook
+    // windows. Ordering by createdAt instead would let the capped feed favour
+    // recently-*entered* rows over recently-*transacted* ones.
+    if (from && to) where.transactionDate = Between(from, to);
+    else if (from) where.transactionDate = MoreThanOrEqual(from);
+    else if (to) where.transactionDate = LessThanOrEqual(to);
 
     return this.ledgerRepository.find({
       where,
-      order: { createdAt: 'DESC' },
+      order: { transactionDate: 'DESC' },
       take: MAX_LEDGER_FEED_ROWS,
       relations: { party: true },
     });

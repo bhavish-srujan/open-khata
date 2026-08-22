@@ -218,6 +218,13 @@ fun LedgerFeedRow.toDomain(): LedgerFeedEntry = LedgerFeedEntry(
     // "1787143741497" here would fail that parse and silently re-date the
     // entry to "now" — the exact bug this pair of mappers just fixed.
     createdAt = com.example.khatabook.utils.IsoTime.format(entry.createdAt),
+    // The business date drives every Cashbook window and grouping. Rows
+    // written before this column existed were backfilled from createdAt by
+    // MIGRATION_2_3, so the 0 guard is only for anything that somehow
+    // predates that — it must not surface as 1 Jan 1970.
+    transactionDate = com.example.khatabook.utils.IsoTime.format(
+        if (entry.transactionDate > 0L) entry.transactionDate else entry.createdAt
+    ),
     party = if (partyName == null) null else PartyResponse(
         id = entry.partyId,
         name = partyName,

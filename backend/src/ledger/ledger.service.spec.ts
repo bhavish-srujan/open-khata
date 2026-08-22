@@ -348,7 +348,7 @@ describe('LedgerService — idempotent create', () => {
       await service.findByBusiness(BUSINESS_A);
 
       expect(findArgs.where.businessId).toBe(BUSINESS_A);
-      expect(findArgs.order).toEqual({ createdAt: 'DESC' });
+      expect(findArgs.order).toEqual({ transactionDate: 'DESC' });
       expect(findArgs.relations).toEqual({ party: true });
     });
 
@@ -361,7 +361,7 @@ describe('LedgerService — idempotent create', () => {
     it('applies no date filter when neither bound is given', async () => {
       await service.findByBusiness(BUSINESS_A);
 
-      expect(findArgs.where.createdAt).toBeUndefined();
+      expect(findArgs.where.transactionDate).toBeUndefined();
     });
 
     it('filters between both bounds', async () => {
@@ -371,7 +371,7 @@ describe('LedgerService — idempotent create', () => {
       });
 
       // Between(from, to) keeps both endpoints in its value array.
-      expect(findArgs.where.createdAt.value).toEqual([
+      expect(findArgs.where.transactionDate.value).toEqual([
         new Date('2026-01-01T00:00:00.000Z'),
         new Date('2026-02-01T00:00:00.000Z'),
       ]);
@@ -383,7 +383,7 @@ describe('LedgerService — idempotent create', () => {
     ])('handles %s', async (_label, range, expectedType) => {
       await service.findByBusiness(BUSINESS_A, range);
 
-      expect(findArgs.where.createdAt.type).toBe(expectedType);
+      expect(findArgs.where.transactionDate.type).toBe(expectedType);
     });
   });
 

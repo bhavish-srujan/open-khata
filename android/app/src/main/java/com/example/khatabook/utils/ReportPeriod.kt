@@ -59,11 +59,22 @@ object ReportPeriodUtils {
         cal.set(Calendar.MILLISECOND, 999)
     }
 
+    /**
+     * @param now the clock to compute the range from. Defaults to the device's
+     * own timezone, which is what makes "Today" mean the user's today.
+     *
+     * This used to default to UTC while a transaction's business date is
+     * recorded at *local* midnight (see SheetDates). East of UTC the two
+     * disagree by the offset: an entry made today in IST is stored at
+     * 18:30Z the previous day, so a UTC "today" window excluded it and the
+     * day's Cash In/Cash Out came out as zero. Callers that need a fixed,
+     * timezone-independent result (tests) still pass their own calendar.
+     */
     fun rangeFor(
         period: ReportPeriod,
         customStartIso: String? = null,
         customEndIso: String? = null,
-        now: Calendar = utcCalendar(),
+        now: Calendar = Calendar.getInstance(),
     ): DateRange {
         val format = isoFormat()
         val end = now.clone() as Calendar

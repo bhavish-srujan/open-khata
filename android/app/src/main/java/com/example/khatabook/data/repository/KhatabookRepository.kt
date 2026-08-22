@@ -1170,10 +1170,66 @@ class KhatabookRepository(
      * total is distributed across days, and backs the "tap a date to see that
      * day's entries" drill-down.
      */
-    fun dayWiseBreakdown(startIso: String, endIso: String): List<Pair<String, List<LedgerFeedEntry>>> {
-        val inRange = _businessLedgerFeed.value.filter { it.createdAt >= startIso && it.createdAt <= endIso }
-        return inRange
-            .groupBy { it.createdAt.take(10) }
+    /**
+     * The one Cashbook dataset: the active business's feed, narrowed by date
+     * range and by collection type.
+     *
+     * Everything the Cashbook shows — the day-wise list, Cash In, Cash Out,
+     * the net — is derived from this single result, so the totals can never
+     * disagree with the rows above them. They previously could: the list was
+     * filtered on the device while the totals came from a separate,
+     * unfiltered server report.
+     *
+     * The date compared is the *business* date the user stated, not when the
+     * row happened to be recorded. Rows written before that field existed
+     * fall back to createdAt, which is exactly what they used to be grouped
+     * by, so no historical row moves.
+     *
+     * [collectionFilter] is null for "All". It is matched against the party's
+     * own stored classification — never inferred from the date, which is a
+     * separate dimension entirely.
+     */
+    fun cashbookRows(
+        startIso: String,
+        endIso: String,
+        collectionFilter: CollectionFrequency? = null,
+    ): List<LedgerFeedEntry> {
+        // Party lookup for this business only. An entry whose party is not in
+        // the active business cannot be classified and is not ours to show.
+        val frequencyByParty = _parties.value
+            .filter { it.businessId == activeBusinessId }
+            .associate { it.id to it.collectionFrequency }
+
+        return _businessLedgerFeed.value.filter { entry ->
+            val businessDate = entry.transactionDate ?: entry.createdAt
+            val inRange = businessDate >= startIso && businessDate <= endIso
+            val matchesCollection = collectionFilter == null ||
+                frequencyByParty[entry.partyId] == collectionFilter
+            inRange && matchesCollection
+        }
+    }
+
+    /** Cash In / Cash Out over exactly the rows [cashbookRows] returns. */
+    fun cashbookTotals(
+        startIso: String,
+        endIso: String,
+        collectionFilter: CollectionFrequency? = null,
+    ): Pair<Double, Double> {
+        val rows = cashbookRows(startIso, endIso, collectionFilter)
+        // GOT is money received, GAVE is credit extended — the same convention
+        // the ledger and balances use everywhere else.
+        val cashIn = rows.filter { it.type == "GOT" }.sumOf { it.amount }
+        val cashOut = rows.filter { it.type == "GAVE" }.sumOf { it.amount }
+        return cashIn to cashOut
+    }
+
+    fun dayWiseBreakdown(
+        startIso: String,
+        endIso: String,
+        collectionFilter: CollectionFrequency? = null,
+    ): List<Pair<String, List<LedgerFeedEntry>>> {
+        return cashbookRows(startIso, endIso, collectionFilter)
+            .groupBy { (it.transactionDate ?: it.createdAt).take(10) }
             .toSortedMap(compareByDescending { it })
             .map { (day, entries) -> day to entries }
     }
@@ -1229,6 +1285,11 @@ class KhatabookRepository(
         paymentMethod = paymentMethod,
         source = source.name,
         createdAt = nowIso(),
+        // The entry's own business date, not "now". Without this the
+        // optimistically-patched row falls back to createdAt, so a backdated
+        // entry would count towards today until the next server refresh
+        // quietly moved it — the Cashbook would disagree with itself offline.
+        transactionDate = com.example.khatabook.utils.IsoTime.format(transactionDate),
         party = party?.let {
             PartyResponse(
                 id = it.id,

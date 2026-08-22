@@ -2,6 +2,8 @@ package com.example.khatabook.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -27,6 +29,7 @@ import com.example.khatabook.ui.components.BounceIconButton
 import com.example.khatabook.ui.components.BounceTextButton
 import com.example.khatabook.ui.theme.*
 import com.example.khatabook.utils.PdfGenerator
+import com.example.khatabook.data.model.CollectionFrequency
 import com.example.khatabook.utils.ReportPeriod
 import com.example.khatabook.utils.ReportPeriodUtils
 import kotlinx.coroutines.launch
@@ -51,6 +54,8 @@ fun CashbookReportScreen(
     val scope = rememberCoroutineScope()
 
     var period by remember { mutableStateOf(ReportPeriod.THIS_MONTH) }
+    /** Null means "All Collections". */
+    var collectionFilter by remember { mutableStateOf<CollectionFrequency?>(null) }
     var customStartMs by remember { mutableStateOf<Long?>(null) }
     var customEndMs by remember { mutableStateOf<Long?>(null) }
     var showDateRangePicker by remember { mutableStateOf(false) }
@@ -69,6 +74,7 @@ fun CashbookReportScreen(
         )
     }
 
+    val isRestoringFromCloud by repository.isRestoringFromCloud.collectAsState()
     val cashflow by repository.cashflowReport.collectAsState()
     var isLoading by remember { mutableStateOf(true) }
     var loadError by remember { mutableStateOf<String?>(null) }
@@ -83,8 +89,17 @@ fun CashbookReportScreen(
         isLoading = false
     }
 
-    val dayWiseRows = remember(range, repository.businessLedgerFeed.collectAsState().value) {
-        repository.dayWiseBreakdown(range.startIso, range.endIso)
+    // Collection type and date range are independent dimensions: this narrows
+    // by which parties a row belongs to, the range narrows by when it
+    // happened. Neither is derived from the other.
+    val feedSnapshot = repository.businessLedgerFeed.collectAsState().value
+    val partiesSnapshot = repository.parties.collectAsState().value
+
+    val dayWiseRows = remember(range, collectionFilter, feedSnapshot, partiesSnapshot) {
+        repository.dayWiseBreakdown(range.startIso, range.endIso, collectionFilter)
+    }
+    val (cashIn, cashOut) = remember(range, collectionFilter, feedSnapshot, partiesSnapshot) {
+        repository.cashbookTotals(range.startIso, range.endIso, collectionFilter)
     }
     // Running/total balance is cumulative across the whole reported range, in
     // chronological order — dayWiseBreakdown returns newest-first for display,
@@ -235,17 +250,58 @@ fun CashbookReportScreen(
                 } else if (loadError != null) {
                     Text(loadError!!, color = KhatabookGiveRed, fontSize = 12.sp, modifier = Modifier.padding(16.dp))
                 } else {
+                    // Computed from the same rows listed below, not from the
+                    // server's own report. Two reasons: the server cannot
+                    // filter by collection, so a filtered list beside
+                    // unfiltered totals would contradict itself; and deriving
+                    // them locally means the figures are right offline and
+                    // update the instant an entry is added.
                     Row(modifier = Modifier.fillMaxWidth().padding(14.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
-                        SummaryStat("Cash In", cashflow?.totalIn ?: 0.0, KhatabookGotGreen)
-                        SummaryStat("Cash Out", cashflow?.totalOut ?: 0.0, KhatabookGiveRed)
-                        SummaryStat("Net", cashflow?.net ?: 0.0, KhatabookHeaderBlue)
+                        SummaryStat("Cash In", cashIn, KhatabookGotGreen)
+                        SummaryStat("Cash Out", cashOut, KhatabookGiveRed)
+                        SummaryStat("Net", cashIn - cashOut, KhatabookHeaderBlue)
                     }
                 }
             }
 
             Spacer(modifier = Modifier.height(12.dp))
+
+            // Collection filter — a separate dimension from the date chips
+            // above, so the two combine rather than override each other.
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(bottom = 8.dp)
+            ) {
+                listOf(
+                    "All Collections" to null,
+                    "Daily Collection" to CollectionFrequency.DAILY,
+                    "Weekly Collection" to CollectionFrequency.WEEKLY,
+                    "Monthly Collection" to CollectionFrequency.MONTHLY,
+                ).forEach { (label, value) ->
+                    FilterChip(
+                        selected = collectionFilter == value,
+                        onClick = { collectionFilter = value },
+                        label = { Text(label, fontSize = 11.sp) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = KhatabookHeaderBlue,
+                            selectedLabelColor = Color.White,
+                        ),
+                    )
+                }
+            }
+
             Text(
-                "Day-wise Breakdown",
+                // Names the active collection, so the heading cannot imply a
+                // filter is applied when it is not (or vice versa).
+                when (collectionFilter) {
+                    CollectionFrequency.DAILY -> "Daily Collection"
+                    CollectionFrequency.WEEKLY -> "Weekly Collection"
+                    CollectionFrequency.MONTHLY -> "Monthly Collection"
+                    null -> "All Collections"
+                },
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Bold,
                 color = KhatabookTextDark,
@@ -253,9 +309,30 @@ fun CashbookReportScreen(
             )
             Spacer(modifier = Modifier.height(6.dp))
 
-            if (!isLoading && loadError == null && dayWiseRows.isEmpty()) {
+            if (isRestoringFromCloud && dayWiseRows.isEmpty()) {
+                // Nothing has been fetched yet — saying "no transactions"
+                // here would read as an empty book rather than a pending one.
                 Box(modifier = Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
-                    Text("No transactions in this period", fontSize = 13.sp, color = KhatabookTextMuted)
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp, color = KhatabookHeaderBlue)
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Text("Restoring your data…", fontSize = 13.sp, color = KhatabookTextMuted)
+                    }
+                }
+            } else if (!isLoading && loadError == null && dayWiseRows.isEmpty()) {
+                Box(modifier = Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
+                    Text(
+                        // Names the collection, so an empty Weekly does not
+                        // look like an empty Cashbook.
+                        when (collectionFilter) {
+                            CollectionFrequency.DAILY -> "No transactions in Daily Collection"
+                            CollectionFrequency.WEEKLY -> "No transactions in Weekly Collection"
+                            CollectionFrequency.MONTHLY -> "No transactions in Monthly Collection"
+                            null -> "No transactions in this period"
+                        },
+                        fontSize = 13.sp,
+                        color = KhatabookTextMuted,
+                    )
                 }
             } else {
                 LazyColumn(
