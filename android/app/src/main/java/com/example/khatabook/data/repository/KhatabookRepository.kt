@@ -1770,8 +1770,12 @@ class KhatabookRepository(
         isNewCustomer: Boolean = false,
         newPhone: String = "",
         newAddress: String = ""
-    ) {
-        if (amountCollected <= 0) return
+    ): Boolean {
+        // Returns whether the row actually became a ledger entry. Every early
+        // return below is a row the user will not see in their book, so the
+        // caller has to be able to tell them rather than report a silent
+        // success.
+        if (amountCollected <= 0) return false
 
         // 1. Resolve the scanned name to an existing party before considering
         // creating one. See PartyMatcher for the priority order and why fuzzy
@@ -1791,7 +1795,15 @@ class KhatabookRepository(
             // a new one here is how "BHAVISH" silently became a second
             // "BHAVISH 10". The record is left for the user to resolve rather
             // than guessed at.
-            if (match is com.example.khatabook.utils.PartyMatch.Ambiguous) {
+            // The scan dialog asks the user to confirm every row it treats as
+            // a new customer before any of this runs. When they have confirmed
+            // one, that decision stands: a merely *similar* existing name does
+            // not override an explicit "yes, this is new".
+            //
+            // Ambiguity used to win here, which silently swallowed the row —
+            // it went onto the pending-review queue and no further, so the
+            // scan appeared to save and the entry never reached the ledger.
+            if (!isNewCustomer && match is com.example.khatabook.utils.PartyMatch.Ambiguous) {
                 _pendingScanMatches.value = _pendingScanMatches.value + AmbiguousScanRecord(
                     scannedName = customerCodeOrName,
                     amount = amountCollected,
@@ -1799,7 +1811,7 @@ class KhatabookRepository(
                     businessId = businessId,
                     candidateIds = match.candidates.map { it.id }
                 )
-                return
+                return false
             }
             if (isNewCustomer) {
                 existingParty = addParty(
@@ -1816,7 +1828,7 @@ class KhatabookRepository(
                     updateParty(existingParty)
                 }
             } else {
-                return // Skip unknown customers from sheet scan if not marked as new
+                return false // Unknown customer, not confirmed as new — nothing to attach to.
             }
         }
 
@@ -1825,7 +1837,7 @@ class KhatabookRepository(
         // scanned days later still lands in the collection it belongs to. An
         // unparseable or absent date falls back to now rather than being
         // rejected — a scan must not be lost over a smudged date.
-        addLedgerEntry(
+        val entry = addLedgerEntry(
             partyId = existingParty.id,
             amount = amountCollected,
             type = TransactionType.GOT,
@@ -1833,6 +1845,7 @@ class KhatabookRepository(
             source = EntrySource.OCR,
             transactionDate = com.example.khatabook.utils.SheetDates.parseOrNull(date)
         )
+        return entry != null
     }
 
     fun addLedgerEntry(

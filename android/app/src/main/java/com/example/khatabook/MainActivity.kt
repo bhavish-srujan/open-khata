@@ -763,8 +763,13 @@ class MainActivity : AppCompatActivity() {
                                             repository.deleteParty(partyId)
                                         },
                                         onSheetRecordBulkSync = { records, date ->
+                                            // Counted, because a row can legitimately fail to
+                                            // attach (a name matching several existing
+                                            // customers, say). Reporting that beats the scan
+                                            // appearing to succeed while entries never show up.
+                                            var saved = 0
                                             records.forEach { rec ->
-                                                repository.addOrUpdateSheetRecord(
+                                                if (repository.addOrUpdateSheetRecord(
                                                     customerCodeOrName = rec.customerCodeOrName,
                                                     amountCollected = rec.amountCollected,
                                                     // A row that carried its own date on the sheet
@@ -775,8 +780,18 @@ class MainActivity : AppCompatActivity() {
                                                     isNewCustomer = rec.isNewCustomer,
                                                     newPhone = rec.newPhone,
                                                     newAddress = rec.newAddress
-                                                )
+                                                )) saved++
                                             }
+                                            val skipped = records.size - saved
+                                            android.widget.Toast.makeText(
+                                                context,
+                                                when {
+                                                    saved == 0 -> "Couldn't add any entries from this sheet"
+                                                    skipped > 0 -> "Added $saved; $skipped needed a customer match"
+                                                    else -> "Added $saved ${if (saved == 1) "entry" else "entries"}"
+                                                },
+                                                android.widget.Toast.LENGTH_LONG
+                                            ).show()
                                         },
                                         canManageParty = canManageParty,
                                         failedOperationCount = failedOperationCount,
