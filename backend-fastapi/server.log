@@ -1,0 +1,224 @@
+2026-10-12 19:06:50 | INFO    | [9dd15349] open_khata.http - --> POST /auth/request-otp [client=127.0.0.1]
+2026-10-12 19:06:51 | WARNING | [9dd15349] open_khata.http - <-- 400 POST /auth/request-otp in 142.72ms
+2026-10-12 19:07:09 | INFO    | [5ea55821] open_khata.http - --> POST /auth/request-otp [client=127.0.0.1]
+2026-10-12 19:07:11 | INFO    | [5ea55821] sqlalchemy.engine.Engine - select pg_catalog.version()
+2026-10-12 19:07:11 | INFO    | [5ea55821] sqlalchemy.engine.Engine - [raw sql] ()
+2026-10-12 19:07:11 | INFO    | [5ea55821] sqlalchemy.engine.Engine - select current_schema()
+2026-10-12 19:07:11 | INFO    | [5ea55821] sqlalchemy.engine.Engine - [raw sql] ()
+2026-10-12 19:07:12 | INFO    | [5ea55821] sqlalchemy.engine.Engine - show standard_conforming_strings
+2026-10-12 19:07:12 | INFO    | [5ea55821] sqlalchemy.engine.Engine - [raw sql] ()
+2026-10-12 19:07:13 | INFO    | [5ea55821] sqlalchemy.engine.Engine - BEGIN (implicit)
+2026-10-12 19:07:13 | INFO    | [5ea55821] sqlalchemy.engine.Engine - SELECT users.id, users.phone_number, users.normalized_phone, users.name, users."currentOtp", users.role, users."otpExpiry", users."otpAttempts", users."sessionVersion", users.created_at, users.updated_at 
+FROM users 
+WHERE users.normalized_phone = $1::VARCHAR
+2026-10-12 19:07:13 | INFO    | [5ea55821] sqlalchemy.engine.Engine - [generated in 0.00066s] ('1234567890',)
+2026-10-12 19:07:14 | INFO    | [5ea55821] sqlalchemy.engine.Engine - SELECT users.id, users.phone_number, users.normalized_phone, users.name, users."currentOtp", users.role, users."otpExpiry", users."otpAttempts", users."sessionVersion", users.created_at, users.updated_at 
+FROM users 
+WHERE users.phone_number = $1::VARCHAR
+2026-10-12 19:07:14 | INFO    | [5ea55821] sqlalchemy.engine.Engine - [generated in 0.00054s] ('+1234567890',)
+2026-10-12 19:07:16 | INFO    | [5ea55821] sqlalchemy.engine.Engine - SELECT users.id, users.phone_number, users.normalized_phone, users.name, users."currentOtp", users.role, users."otpExpiry", users."otpAttempts", users."sessionVersion", users.created_at, users.updated_at 
+FROM users 
+WHERE regexp_replace(users.phone_number, $1::VARCHAR, $2::VARCHAR, $3::VARCHAR) = $4::VARCHAR
+2026-10-12 19:07:16 | INFO    | [5ea55821] sqlalchemy.engine.Engine - [generated in 0.00025s] ('\\D', '', 'g', '1234567890')
+2026-10-12 19:07:16 | INFO    | [5ea55821] sqlalchemy.engine.Engine - INSERT INTO users (id, phone_number, normalized_phone, name, "currentOtp", role, "otpExpiry", "otpAttempts", "sessionVersion", created_at, updated_at) VALUES ($1::UUID, $2::VARCHAR, $3::VARCHAR, $4::VARCHAR, $5::VARCHAR, $6::users_role_enum, $7::TIMESTAMP WITHOUT TIME ZONE, $8::INTEGER, $9::INTEGER, $10::TIMESTAMP WITHOUT TIME ZONE, $11::TIMESTAMP WITHOUT TIME ZONE)
+2026-10-12 19:07:16 | INFO    | [5ea55821] sqlalchemy.engine.Engine - [generated in 0.00033s] (UUID('95186fa6-5818-4696-9583-0dcd8402858d'), '+1234567890', '1234567890', None, None, 'OWNER', None, 0, 1, datetime.datetime(2026, 10, 12, 13, 37, 16, 472562), datetime.datetime(2026, 10, 12, 13, 37, 16, 472562))
+2026-10-12 19:07:16 | INFO    | [5ea55821] sqlalchemy.engine.Engine - ROLLBACK
+2026-10-12 19:07:17 | ERROR   | [5ea55821] open_khata.http - <!- 500 POST /auth/request-otp FAILED in 7915.91ms: [Errno 22] Invalid argument
+2026-10-12 19:07:17 | ERROR   | open_khata.errors - Unhandled server error processing /auth/request-otp: [Errno 22] Invalid argument
+Traceback (most recent call last):
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\starlette\middleware\errors.py", line 164, in __call__
+    await self.app(scope, receive, _send)
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\fastapi\telemetry\_asgi.py", line 151, in __call__
+    await self.app(scope, receive, send)
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\starlette\middleware\base.py", line 197, in __call__
+    response = await self.dispatch_func(request, call_next)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\open-khata\backend-fastapi\app\middleware.py", line 35, in dispatch
+    response = await call_next(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\starlette\middleware\base.py", line 173, in call_next
+    raise app_exc from app_exc.__cause__ or app_exc.__context__
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\starlette\middleware\base.py", line 149, in coro
+    await self.app(scope, receive_or_disconnect, send_no_error)
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\starlette\middleware\exceptions.py", line 63, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\fastapi\middleware\asyncexitstack.py", line 18, in __call__
+    await self.app(scope, receive, send)
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\starlette\routing.py", line 676, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\fastapi\routing.py", line 2786, in app
+    await route.handle(scope, receive, send)
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\fastapi\routing.py", line 1817, in handle
+    await self.original_router.handle(scope, receive, send)
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\fastapi\routing.py", line 2869, in handle
+    await included_router._handle_selected(scope, receive, send)
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\fastapi\routing.py", line 1843, in _handle_selected
+    await original_route.handle(scope, receive, send)
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\fastapi\routing.py", line 1308, in handle
+    await effective_context.app(scope, receive, send)
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\fastapi\routing.py", line 165, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\fastapi\routing.py", line 151, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\fastapi\routing.py", line 727, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\fastapi\routing.py", line 360, in run_endpoint_function
+    return await dependant.call(**values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\open-khata\backend-fastapi\app\routers\auth.py", line 116, in request_otp
+    print(f"\n{'='*50}\n>>> [DEV] GENERATED OTP FOR {phone_number}: {otp_code} <<<\n{'='*50}\n", flush=True)
+OSError: [Errno 22] Invalid argument
+2026-10-12 19:13:44 | INFO    | [b1f77a08] open_khata.http - --> POST /auth/request-otp [client=127.0.0.1]
+2026-10-12 19:13:45 | INFO    | [b1f77a08] sqlalchemy.engine.Engine - BEGIN (implicit)
+2026-10-12 19:13:45 | INFO    | [b1f77a08] sqlalchemy.engine.Engine - SELECT users.id, users.phone_number, users.normalized_phone, users.name, users."currentOtp", users.role, users."otpExpiry", users."otpAttempts", users."sessionVersion", users.created_at, users.updated_at 
+FROM users 
+WHERE users.normalized_phone = $1::VARCHAR
+2026-10-12 19:13:45 | INFO    | [b1f77a08] sqlalchemy.engine.Engine - [cached since 392.2s ago] ('1234567890',)
+2026-10-12 19:13:45 | INFO    | [b1f77a08] sqlalchemy.engine.Engine - SELECT users.id, users.phone_number, users.normalized_phone, users.name, users."currentOtp", users.role, users."otpExpiry", users."otpAttempts", users."sessionVersion", users.created_at, users.updated_at 
+FROM users 
+WHERE users.phone_number = $1::VARCHAR
+2026-10-12 19:13:45 | INFO    | [b1f77a08] sqlalchemy.engine.Engine - [cached since 391.1s ago] ('+1234567890',)
+2026-10-12 19:13:46 | INFO    | [b1f77a08] sqlalchemy.engine.Engine - SELECT users.id, users.phone_number, users.normalized_phone, users.name, users."currentOtp", users.role, users."otpExpiry", users."otpAttempts", users."sessionVersion", users.created_at, users.updated_at 
+FROM users 
+WHERE regexp_replace(users.phone_number, $1::VARCHAR, $2::VARCHAR, $3::VARCHAR) = $4::VARCHAR
+2026-10-12 19:13:46 | INFO    | [b1f77a08] sqlalchemy.engine.Engine - [cached since 390.2s ago] ('\\D', '', 'g', '1234567890')
+2026-10-12 19:13:47 | INFO    | [b1f77a08] sqlalchemy.engine.Engine - INSERT INTO users (id, phone_number, normalized_phone, name, "currentOtp", role, "otpExpiry", "otpAttempts", "sessionVersion", created_at, updated_at) VALUES ($1::UUID, $2::VARCHAR, $3::VARCHAR, $4::VARCHAR, $5::VARCHAR, $6::users_role_enum, $7::TIMESTAMP WITHOUT TIME ZONE, $8::INTEGER, $9::INTEGER, $10::TIMESTAMP WITHOUT TIME ZONE, $11::TIMESTAMP WITHOUT TIME ZONE)
+2026-10-12 19:13:47 | INFO    | [b1f77a08] sqlalchemy.engine.Engine - [cached since 391.2s ago] (UUID('bc058b65-9c4b-48c1-9165-6b1f34dd69dd'), '+1234567890', '1234567890', None, None, 'OWNER', None, 0, 1, datetime.datetime(2026, 10, 12, 13, 43, 47, 654782), datetime.datetime(2026, 10, 12, 13, 43, 47, 654782))
+2026-10-12 19:13:47 | INFO    | [b1f77a08] sqlalchemy.engine.Engine - ROLLBACK
+2026-10-12 19:13:47 | ERROR   | [b1f77a08] open_khata.http - <!- 500 POST /auth/request-otp FAILED in 3181.43ms: [Errno 22] Invalid argument
+2026-10-12 19:13:47 | ERROR   | open_khata.errors - Unhandled server error processing /auth/request-otp: [Errno 22] Invalid argument
+Traceback (most recent call last):
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\starlette\middleware\errors.py", line 164, in __call__
+    await self.app(scope, receive, _send)
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\fastapi\telemetry\_asgi.py", line 151, in __call__
+    await self.app(scope, receive, send)
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\starlette\middleware\base.py", line 197, in __call__
+    response = await self.dispatch_func(request, call_next)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\open-khata\backend-fastapi\app\middleware.py", line 35, in dispatch
+    response = await call_next(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\starlette\middleware\base.py", line 173, in call_next
+    raise app_exc from app_exc.__cause__ or app_exc.__context__
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\starlette\middleware\base.py", line 149, in coro
+    await self.app(scope, receive_or_disconnect, send_no_error)
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\starlette\middleware\exceptions.py", line 63, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\fastapi\middleware\asyncexitstack.py", line 18, in __call__
+    await self.app(scope, receive, send)
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\starlette\routing.py", line 676, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\fastapi\routing.py", line 2786, in app
+    await route.handle(scope, receive, send)
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\fastapi\routing.py", line 1817, in handle
+    await self.original_router.handle(scope, receive, send)
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\fastapi\routing.py", line 2869, in handle
+    await included_router._handle_selected(scope, receive, send)
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\fastapi\routing.py", line 1843, in _handle_selected
+    await original_route.handle(scope, receive, send)
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\fastapi\routing.py", line 1308, in handle
+    await effective_context.app(scope, receive, send)
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\fastapi\routing.py", line 165, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\fastapi\routing.py", line 151, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\fastapi\routing.py", line 727, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\fastapi\routing.py", line 360, in run_endpoint_function
+    return await dependant.call(**values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\open-khata\backend-fastapi\app\routers\auth.py", line 116, in request_otp
+    print(f"\n{'='*50}\n>>> [DEV] GENERATED OTP FOR {phone_number}: {otp_code} <<<\n{'='*50}\n", flush=True)
+OSError: [Errno 22] Invalid argument
+2026-10-12 19:21:56 | INFO    | [521a0010] open_khata.http - --> POST /auth/request-otp [client=127.0.0.1]
+2026-10-12 19:22:01 | INFO    | [521a0010] sqlalchemy.engine.Engine - BEGIN (implicit)
+2026-10-12 19:22:01 | INFO    | [521a0010] sqlalchemy.engine.Engine - SELECT users.id, users.phone_number, users.normalized_phone, users.name, users."currentOtp", users.role, users."otpExpiry", users."otpAttempts", users."sessionVersion", users.created_at, users.updated_at 
+FROM users 
+WHERE users.normalized_phone = $1::VARCHAR
+2026-10-12 19:22:01 | INFO    | [521a0010] sqlalchemy.engine.Engine - [cached since 888.8s ago] ('1234567890',)
+2026-10-12 19:22:04 | INFO    | [521a0010] sqlalchemy.engine.Engine - SELECT users.id, users.phone_number, users.normalized_phone, users.name, users."currentOtp", users.role, users."otpExpiry", users."otpAttempts", users."sessionVersion", users.created_at, users.updated_at 
+FROM users 
+WHERE users.phone_number = $1::VARCHAR
+2026-10-12 19:22:04 | INFO    | [521a0010] sqlalchemy.engine.Engine - [cached since 890.4s ago] ('+1234567890',)
+2026-10-12 19:22:05 | INFO    | [521a0010] sqlalchemy.engine.Engine - SELECT users.id, users.phone_number, users.normalized_phone, users.name, users."currentOtp", users.role, users."otpExpiry", users."otpAttempts", users."sessionVersion", users.created_at, users.updated_at 
+FROM users 
+WHERE regexp_replace(users.phone_number, $1::VARCHAR, $2::VARCHAR, $3::VARCHAR) = $4::VARCHAR
+2026-10-12 19:22:05 | INFO    | [521a0010] sqlalchemy.engine.Engine - [cached since 889.2s ago] ('\\D', '', 'g', '1234567890')
+2026-10-12 19:22:06 | INFO    | [521a0010] sqlalchemy.engine.Engine - INSERT INTO users (id, phone_number, normalized_phone, name, "currentOtp", role, "otpExpiry", "otpAttempts", "sessionVersion", created_at, updated_at) VALUES ($1::UUID, $2::VARCHAR, $3::VARCHAR, $4::VARCHAR, $5::VARCHAR, $6::users_role_enum, $7::TIMESTAMP WITHOUT TIME ZONE, $8::INTEGER, $9::INTEGER, $10::TIMESTAMP WITHOUT TIME ZONE, $11::TIMESTAMP WITHOUT TIME ZONE)
+2026-10-12 19:22:06 | INFO    | [521a0010] sqlalchemy.engine.Engine - [cached since 890s ago] (UUID('29b0336f-1281-4076-bd37-59190f566ab1'), '+1234567890', '1234567890', None, None, 'OWNER', None, 0, 1, datetime.datetime(2026, 10, 12, 13, 52, 6, 327062), datetime.datetime(2026, 10, 12, 13, 52, 6, 327062))
+2026-10-12 19:22:06 | INFO    | [521a0010] sqlalchemy.engine.Engine - ROLLBACK
+2026-10-12 19:22:06 | ERROR   | [521a0010] open_khata.http - <!- 500 POST /auth/request-otp FAILED in 9894.08ms: [Errno 22] Invalid argument
+2026-10-12 19:22:06 | ERROR   | open_khata.errors - Unhandled server error processing /auth/request-otp: [Errno 22] Invalid argument
+Traceback (most recent call last):
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\starlette\middleware\errors.py", line 164, in __call__
+    await self.app(scope, receive, _send)
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\fastapi\telemetry\_asgi.py", line 151, in __call__
+    await self.app(scope, receive, send)
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\starlette\middleware\base.py", line 197, in __call__
+    response = await self.dispatch_func(request, call_next)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\open-khata\backend-fastapi\app\middleware.py", line 35, in dispatch
+    response = await call_next(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\starlette\middleware\base.py", line 173, in call_next
+    raise app_exc from app_exc.__cause__ or app_exc.__context__
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\starlette\middleware\base.py", line 149, in coro
+    await self.app(scope, receive_or_disconnect, send_no_error)
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\starlette\middleware\exceptions.py", line 63, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\fastapi\middleware\asyncexitstack.py", line 18, in __call__
+    await self.app(scope, receive, send)
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\starlette\routing.py", line 676, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\fastapi\routing.py", line 2786, in app
+    await route.handle(scope, receive, send)
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\fastapi\routing.py", line 1817, in handle
+    await self.original_router.handle(scope, receive, send)
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\fastapi\routing.py", line 2869, in handle
+    await included_router._handle_selected(scope, receive, send)
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\fastapi\routing.py", line 1843, in _handle_selected
+    await original_route.handle(scope, receive, send)
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\fastapi\routing.py", line 1308, in handle
+    await effective_context.app(scope, receive, send)
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\fastapi\routing.py", line 165, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\fastapi\routing.py", line 151, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\fastapi\routing.py", line 727, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\open-khata\backend-fastapi\.venv\Lib\site-packages\fastapi\routing.py", line 360, in run_endpoint_function
+    return await dependant.call(**values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\open-khata\backend-fastapi\app\routers\auth.py", line 116, in request_otp
+    logger.info(
+OSError: [Errno 22] Invalid argument

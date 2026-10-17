@@ -1,0 +1,1 @@
+"""Open Khata FastAPI Backend"""
