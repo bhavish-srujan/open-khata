@@ -1,76 +1,93 @@
-# Open Khata 📒
+Open Khata 📒
 
-### Simple, Smart & Digital Bookkeeping for Small Businesses
+Simple, Smart & Digital Bookkeeping for Small Businesses
 
-**Open Khata** is a digital bookkeeping application designed to help small businesses replace traditional paper-based khata books with a convenient digital ledger.
+Open Khata is a digital bookkeeping application designed to help small businesses replace traditional paper-based khata books with a convenient digital ledger.
 
-Manage customers, record transactions, track outstanding balances, and keep financial records organized in one place. With features such as digital ledger management, transaction tracking, payment reminders, and **Scan Khata**, Open Khata simplifies everyday bookkeeping.
+Manage customers, record transactions, track outstanding balances, and keep financial records organized in one place. With features such as digital ledger management, transaction tracking, payment reminders, and Scan Khata, Open Khata simplifies everyday bookkeeping.
 
 The goal is simple: make bookkeeping easier, faster, and more accessible for every small business.
 
----
+✨ Features
 
-## ✨ Features
+📒 Digital Ledger Management
 
-### 📒 Digital Ledger Management
+Create and manage customer records.
 
-* Create and manage customer records.
-* Maintain individual customer ledgers.
-* Record money given and money received.
-* Track outstanding balances.
-* View transaction history for individual customers.
+Maintain individual customer ledgers.
 
-### 📸 Scan Khata
+Record money given and money received.
+
+Track outstanding balances.
+
+View transaction history for individual customers.
+
+📸 Scan Khata
 
 Digitize traditional paper-based ledger records.
 
-* Upload images of existing khata records.
-* Extract relevant ledger information from images.
-* Convert extracted information into structured data.
-* Review extracted records before proceeding.
-* Reduce the effort required to enter existing ledger information manually.
+Upload images of existing khata records.
 
-### 🔐 Authentication & Security
+Extract relevant ledger information from images.
 
-* OTP-based authentication.
-* JWT-based authorization.
-* Protected API endpoints.
-* Server-side request validation.
-* Secure management of application credentials.
-* Business-level data isolation.
+Convert extracted information into structured data.
 
-### 💰 Transaction Tracking
+Review extracted records before proceeding.
 
-* Record GAVE and GOT transactions.
-* Maintain customer transaction histories.
-* Track outstanding payments.
-* Keep financial records organized.
+Reduce the effort required to enter existing ledger information manually.
 
-### 📲 Payment Reminders
+🔐 Authentication & Security
 
-* Send payment reminders to customers.
-* Help businesses follow up on outstanding balances.
-* Integrate messaging services for customer communication.
+OTP-based authentication.
 
-### 🔄 Offline-Friendly Synchronization
+JWT-based authorization.
 
-* Queue eligible operations when connectivity is unavailable.
-* Synchronize queued operations when connectivity returns.
-* Support a more reliable bookkeeping experience in environments with inconsistent internet access.
+Protected API endpoints.
 
-### 🏪 Multi-Business Support
+Server-side request validation.
 
-* Organize records by business.
-* Keep business data appropriately separated.
-* Scope operations to the relevant business context.
+Secure management of application credentials.
 
----
+Business-level data isolation.
 
-## 🏗️ System Architecture
+💰 Transaction Tracking
+
+Record GAVE and GOT transactions.
+
+Maintain customer transaction histories.
+
+Track outstanding payments.
+
+Keep financial records organized.
+
+📲 Payment Reminders
+
+Send payment reminders to customers.
+
+Help businesses follow up on outstanding balances.
+
+Integrate messaging services for customer communication.
+
+🔄 Offline-Friendly Synchronization
+
+Queue eligible operations when connectivity is unavailable.
+
+Synchronize queued operations when connectivity returns.
+
+Support a more reliable bookkeeping experience in environments with inconsistent internet access.
+
+🏪 Multi-Business Support
+
+Organize records by business.
+
+Keep business data appropriately separated.
+
+Scope operations to the relevant business context.
+
+🏗️ System Architecture
 
 Open Khata follows a client-server architecture. The Android application communicates with a backend REST API, which handles business logic, database operations, authentication, and external service integrations.
 
-```text
 ┌──────────────────────────────────┐
 │          Android App             │
 │                                  │
@@ -88,7 +105,7 @@ Open Khata follows a client-server architecture. The Android application communi
 ┌──────────────────────────────────┐
 │          Backend API             │
 │                                  │
-│ NestJS + TypeScript              │
+│ FastAPI + Python              │
 │                                  │
 │ • Authentication & Authorization │
 │ • Business Logic                 │
@@ -107,36 +124,67 @@ Open Khata follows a client-server architecture. The Android application communi
 │ Ledgers        │ │                │
 │ Transactions   │ │                │
 └────────────────┘ └────────────────┘
-```
 
-*Note: The diagram represents the intended architecture and should be checked against the current codebase before publication.*
+Note: The diagram represents the intended architecture and should be checked against the current codebase before publication.
 
----
+🛠️ Tech Stack
 
-## 🛠️ Tech Stack
+Component
 
-| Component             | Technology        |
-| --------------------- | ----------------- |
-| Android Development   | Kotlin            |
-| UI Framework          | Jetpack Compose   |
-| Backend Framework     | NestJS            |
-| Programming Language  | TypeScript        |
-| API Architecture      | REST              |
-| Database              | PostgreSQL        |
-| ORM                   | TypeORM           |
-| Authentication        | OTP and JWT       |
-| Image Processing      | Google Gemini API |
-| SMS Integration       | TextBee           |
-| Messaging Integration | WhatsApp API      |
-| Backend Deployment    | Render            |
+Technology
 
----
+Android Development
 
-## 📸 How Scan Khata Works
+Kotlin
+
+UI Framework
+
+Jetpack Compose
+
+Backend Framework
+
+FastAPI
+
+Programming Language
+
+Python
+
+API Architecture
+
+REST
+
+Database
+
+PostgreSQL
+
+ORM
+
+SQLAlchemy (if configured)
+
+Authentication
+
+OTP and JWT
+
+Image Processing
+
+Google Gemini API
+
+SMS Integration
+
+TextBee
+
+Messaging Integration
+
+WhatsApp API
+
+Backend Deployment
+
+Render
+
+📸 How Scan Khata Works
 
 Scan Khata helps users transfer information from traditional paper-based ledgers into a digital format.
 
-```text
 Select Khata Image
         │
         ▼
@@ -156,218 +204,263 @@ Review the Results
         │
         ▼
 Confirm the Information
-```
 
-### Workflow
+Workflow
 
-1. Select an image of an existing khata record.
-2. Submit the image for processing.
-3. Extract relevant information from the image.
-4. Convert the extracted information into structured data.
-5. Review the results in the application.
-6. Confirm the information before using it in the bookkeeping workflow.
+Select an image of an existing khata record.
+
+Submit the image for processing.
+
+Extract relevant information from the image.
+
+Convert the extracted information into structured data.
+
+Review the results in the application.
+
+Confirm the information before using it in the bookkeeping workflow.
 
 This feature helps reduce manual data entry when transitioning from physical ledgers to digital bookkeeping.
 
----
-
-## 🔐 Security
+🔐 Security
 
 Open Khata follows a backend-centered approach to application security.
 
-* **Authentication:** OTP-based authentication and JWT-based authorization.
-* **API protection:** Secure endpoints that require authenticated access.
-* **Data isolation:** Restrict access to the appropriate business records.
-* **Credential management:** Keep sensitive API credentials on the backend.
-* **Input validation:** Validate requests before processing them.
-* **Financial accuracy:** Validate transaction data and ledger calculations independently of extracted image content.
-* **Secure communication:** Use HTTPS for production API requests.
+Authentication: OTP-based authentication and JWT-based authorization.
 
----
+API protection: Secure endpoints that require authenticated access.
 
-## 📂 Project Structure
+Data isolation: Restrict access to the appropriate business records.
 
-The following is an illustrative project structure. Update the directory names to match the actual repository.
+Credential management: Keep sensitive API credentials on the backend.
 
-```text
+Input validation: Validate requests before processing them.
+
+Financial accuracy: Validate transaction data and ledger calculations independently of extracted image content.
+
+Secure communication: Use HTTPS for production API requests.
+
+📂 Project Structure
+
+The following is an illustrative project structure based on the current android/ and backend-fastapi/ folders. Update filenames to match the actual repository.
+
 open-khata/
 │
 ├── android/                 # Android application
 │   ├── app/
 │   └── ...
 │
-├── backend/                 # NestJS backend
+├── backend-fastapi/         # FastAPI backend
 │   ├── src/
 │   │   ├── auth/
 │   │   ├── users/
 │   │   └── ...
 │   ├── test/
-│   └── package.json
+│   └── requirements.txt
 │
 └── README.md
-```
 
----
+⚙️ Getting Started
 
-## ⚙️ Getting Started
+Prerequisites
 
-### Prerequisites
+Python 3.10+ and pip
 
-* Node.js and npm
-* PostgreSQL
-* Android Studio
-* A compatible JDK
-* Required external service credentials
+PostgreSQL
 
-### 1. Clone the Repository
+Android Studio
 
-```bash
+A compatible JDK
+
+Required external service credentials
+
+1. Clone the Repository
+
 git clone <YOUR_REPOSITORY_URL>
 cd <YOUR_REPOSITORY_DIRECTORY>
-```
 
-### 2. Set Up the Backend
+2. Set Up the FastAPI Backend
 
-Navigate to the backend directory:
+Navigate to the FastAPI backend directory and install its dependencies:
 
-```bash
-cd backend
-npm install
-```
+cd backend-fastapi
+pip install -r requirements.txt
 
 Configure the required environment variables using the project's existing configuration.
 
 Example:
 
-```env
-PORT=3000
+PORT=8000
 DATABASE_URL=your_postgresql_connection_string
 
 GEMINI_API_KEY=your_gemini_api_key
 
 # Configure authentication secrets.
 # Configure messaging service credentials.
-```
 
 The variable names above are illustrative. Refer to the actual backend configuration for the required values.
 
-**Never commit API keys, database passwords, authentication secrets, or production credentials to version control.**
+Never commit API keys, database passwords, authentication secrets, or production credentials to version control.
 
-### 3. Run the Backend
+3. Run the Backend
 
-For a typical NestJS development setup:
+Start the FastAPI development server. Adjust main:app if your application entry point is different:
 
-```bash
-npm run start:dev
-```
+uvicorn main:app --reload
 
 Verify that the server starts successfully and connects to PostgreSQL.
 
-### 4. Run the Android Application
+4. Run the Android Application
 
-1. Open the Android project in Android Studio.
-2. Configure the backend API base URL.
-3. Sync the Gradle project.
-4. Build the application.
-5. Run it on an emulator or physical Android device.
+Open the Android project in Android Studio.
+
+Configure the backend API base URL.
+
+Sync the Gradle project.
+
+Build the application.
+
+Run it on an emulator or physical Android device.
 
 Ensure that the configured API URL is reachable from the device.
 
----
+🌐 Core Modules
 
-## 🌐 Core Modules
+Module
 
-| Module                 | Responsibility                         |
-| ---------------------- | -------------------------------------- |
-| Authentication         | User authentication and access control |
-| User Management        | Manage user information                |
-| Business Management    | Organize business records              |
-| Customer Management    | Create and manage customer records     |
-| Ledger Management      | Maintain customer ledgers              |
-| Transaction Management | Record GAVE/GOT transactions           |
-| Scan Khata             | Extract information from ledger images |
-| Payment Reminders      | Support customer payment follow-ups    |
+Responsibility
+
+Authentication
+
+User authentication and access control
+
+User Management
+
+Manage user information
+
+Business Management
+
+Organize business records
+
+Customer Management
+
+Create and manage customer records
+
+Ledger Management
+
+Maintain customer ledgers
+
+Transaction Management
+
+Record GAVE/GOT transactions
+
+Scan Khata
+
+Extract information from ledger images
+
+Payment Reminders
+
+Support customer payment follow-ups
 
 Refer to the actual backend controllers and API documentation for implemented routes and request formats.
 
----
-
-## 🚀 Deployment
+🚀 Deployment
 
 The backend can be deployed using Render, with PostgreSQL serving as the application's relational database.
 
 Typical deployment steps include:
 
-1. Provision a PostgreSQL database.
-2. Configure the production database connection.
-3. Set the required environment variables.
-4. Configure external service credentials.
-5. Deploy the backend.
-6. Verify database connectivity and API availability.
-7. Configure the Android application to use the production API.
-8. Test authentication, ledger operations, and transaction handling.
+Provision a PostgreSQL database.
 
----
+Configure the production database connection.
 
-## 🧪 Testing
+Set the required environment variables.
+
+Configure external service credentials.
+
+Deploy the backend.
+
+Verify database connectivity and API availability.
+
+Configure the Android application to use the production API.
+
+Test authentication, ledger operations, and transaction handling.
+
+🧪 Testing
 
 Important areas to validate include:
 
-* OTP authentication and JWT authorization.
-* Customer creation and management.
-* Transaction creation and updates.
-* Ledger balance calculations.
-* Business-level data isolation.
-* Scan Khata image processing.
-* Validation of extracted records.
-* Offline operation queuing and synchronization.
-* Payment reminder delivery.
-* Database connectivity and error handling.
+OTP authentication and JWT authorization.
+
+Customer creation and management.
+
+Transaction creation and updates.
+
+Ledger balance calculations.
+
+Business-level data isolation.
+
+Scan Khata image processing.
+
+Validation of extracted records.
+
+Offline operation queuing and synchronization.
+
+Payment reminder delivery.
+
+Database connectivity and error handling.
 
 Financial records should be validated carefully to maintain accurate customer balances.
 
----
-
-## 💡 Engineering Highlights
+💡 Engineering Highlights
 
 Open Khata brings together practical software engineering concepts:
 
-* Full-stack application development.
-* REST API design and implementation.
-* Modular backend architecture with NestJS.
-* Relational database design using PostgreSQL.
-* Database access through TypeORM.
-* Authentication and authorization.
-* Third-party service integrations.
-* Image-processing workflows.
-* Offline operation queuing and synchronization.
-* Business-level data isolation.
+Full-stack application development.
 
----
+REST API design and implementation.
 
-## 🔮 Future Enhancements
+Modular backend architecture with FastAPI.
+
+Relational database design using PostgreSQL.
+
+Database access through SQLAlchemy (if configured).
+
+Authentication and authorization.
+
+Third-party service integrations.
+
+Image-processing workflows.
+
+Offline operation queuing and synchronization.
+
+Business-level data isolation.
+
+🔮 Future Enhancements
 
 Potential improvements include:
 
-* Advanced ledger search and filtering.
-* Financial reports and summaries.
-* Exportable transaction statements.
-* Improved offline synchronization.
-* More comprehensive transaction audit trails.
-* Enhanced image-processing accuracy.
-* Automated testing for financial workflows.
-* Better error handling and application monitoring.
+Advanced ledger search and filtering.
+
+Financial reports and summaries.
+
+Exportable transaction statements.
+
+Improved offline synchronization.
+
+More comprehensive transaction audit trails.
+
+Enhanced image-processing accuracy.
+
+Automated testing for financial workflows.
+
+Better error handling and application monitoring.
 
 These are potential improvements, not claims about currently implemented functionality.
 
----
-
-## 🎯 Project Objective
+🎯 Project Objective
 
 Open Khata aims to simplify bookkeeping for small businesses by replacing manual record-keeping with a structured digital ledger.
 
 By combining customer management, transaction tracking, balance monitoring, and convenient ledger digitization, the application helps businesses maintain organized financial records with less manual effort.
 
----
-
-**Open Khata — Your business ledger, simplified.**
+Open Khata — Your business ledger, simplified.
