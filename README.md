@@ -86,46 +86,19 @@ Scope operations to the relevant business context.
 
 🏗️ System Architecture
 
-Open Khata follows a client-server architecture. The Android application communicates with a backend REST API, which handles business logic, database operations, authentication, and external service integrations.
+Open Khata follows a client-server architecture. The Android application communicates with a FastAPI backend through REST APIs. The backend handles business logic, authentication, database operations, and external service integrations.
 
-┌──────────────────────────────────┐
-│          Android App             │
-│                                  │
-│ Kotlin + Jetpack Compose         │
-│                                  │
-│ • Customer Management            │
-│ • Digital Ledger                 │
-│ • Transaction Tracking           │
-│ • Scan Khata                     │
-│ • Authentication                 │
-└────────────────┬─────────────────┘
-                 │
-                 │ HTTPS / REST API
-                 ▼
-┌──────────────────────────────────┐
-│          Backend API             │
-│                                  │
-│ FastAPI + Python              │
-│                                  │
-│ • Authentication & Authorization │
-│ • Business Logic                 │
-│ • Ledger Management              │
-│ • Transaction Processing         │
-│ • Request Validation             │
-│ • External Integrations          │
-└────────┬───────────┬─────────────┘
-         │           │
-         ▼           ▼
-┌────────────────┐ ┌────────────────┐
-│  PostgreSQL    │ │ External APIs   │
-│                │ │                │
-│ Users          │ │ Image Processing│
-│ Businesses     │ │ SMS / Messaging │
-│ Ledgers        │ │                │
-│ Transactions   │ │                │
-└────────────────┘ └────────────────┘
+flowchart TD
+    A["Android App<br/>Kotlin + Jetpack Compose"]
+    B["FastAPI Backend<br/>Python"]
+    C[("PostgreSQL Database")]
+    D["External Services<br/>Image Processing / SMS / Messaging"]
 
-Note: The diagram represents the intended architecture and should be checked against the current codebase before publication.
+    A <-->|"HTTPS / REST API"| B
+    B <--> C
+    B <--> D
+
+Note: This diagram describes the intended architecture. Confirm external integrations and implementation details against the current codebase before publication.
 
 🛠️ Tech Stack
 
@@ -157,10 +130,6 @@ Database
 
 PostgreSQL
 
-ORM
-
-SQLAlchemy (if configured)
-
 Authentication
 
 OTP and JWT
@@ -180,6 +149,8 @@ WhatsApp API
 Backend Deployment
 
 Render
+
+Note: The ORM/database access library is not specified here because it should be verified against the current FastAPI codebase.
 
 📸 How Scan Khata Works
 
@@ -241,29 +212,22 @@ Secure communication: Use HTTPS for production API requests.
 
 📂 Project Structure
 
-The following is an illustrative project structure based on the current android/ and backend-fastapi/ folders. Update filenames to match the actual repository.
+The repository contains the Android application and the FastAPI backend.
 
 open-khata/
-│
 ├── android/                 # Android application
-│   ├── app/
-│   └── ...
-│
 ├── backend-fastapi/         # FastAPI backend
-│   ├── src/
-│   │   ├── auth/
-│   │   ├── users/
-│   │   └── ...
-│   ├── test/
-│   └── requirements.txt
-│
-└── README.md
+└── README.md                # Project documentation
+
+The internal file structure may vary depending on the current implementation.
 
 ⚙️ Getting Started
 
 Prerequisites
 
-Python 3.10+ and pip
+Python 3.10+ (use the version required by the backend project)
+
+pip
 
 PostgreSQL
 
@@ -276,42 +240,37 @@ Required external service credentials
 1. Clone the Repository
 
 git clone <YOUR_REPOSITORY_URL>
-cd <YOUR_REPOSITORY_DIRECTORY>
+cd open-khata
 
 2. Set Up the FastAPI Backend
 
-Navigate to the FastAPI backend directory and install its dependencies:
-
 cd backend-fastapi
+
+Create and activate a virtual environment if you use one:
+
+python -m venv .venv
+
+On Windows PowerShell:
+
+.\.venv\Scripts\Activate.ps1
+
+Install dependencies using the dependency file present in the repository. If the project contains requirements.txt, run:
+
 pip install -r requirements.txt
 
-Configure the required environment variables using the project's existing configuration.
-
-Example:
-
-PORT=8000
-DATABASE_URL=your_postgresql_connection_string
-
-GEMINI_API_KEY=your_gemini_api_key
-
-# Configure authentication secrets.
-# Configure messaging service credentials.
-
-The variable names above are illustrative. Refer to the actual backend configuration for the required values.
-
-Never commit API keys, database passwords, authentication secrets, or production credentials to version control.
+Configure the environment variables required by the actual backend implementation. Do not commit API keys, database passwords, authentication secrets, or production credentials.
 
 3. Run the Backend
 
-Start the FastAPI development server. Adjust main:app if your application entry point is different:
+For a typical FastAPI application, run Uvicorn using the actual Python module and FastAPI application variable name. For example, if the entry point is main.py and the app variable is app:
 
 uvicorn main:app --reload
 
-Verify that the server starts successfully and connects to PostgreSQL.
+If your entry point differs, replace main:app with the correct import path. Verify that the server starts and connects to PostgreSQL.
 
 4. Run the Android Application
 
-Open the Android project in Android Studio.
+Open the android/ project in Android Studio.
 
 Configure the backend API base URL.
 
@@ -423,7 +382,7 @@ Modular backend architecture with FastAPI.
 
 Relational database design using PostgreSQL.
 
-Database access through SQLAlchemy (if configured).
+Database access through the backend's configured database layer.
 
 Authentication and authorization.
 
